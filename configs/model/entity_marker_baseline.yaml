@@ -1,0 +1,4 @@
+_target_: drugprot.models.entity_marker_baseline.EntityMarkerBaseline
+
+transformer: microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract
+lr: 5e-5

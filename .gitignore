@@ -1,0 +1,8 @@
+# Project exclude paths
+/data/training_brat/
+/analysis/*ann
+/analysis/*txt
+/analysis/.stats_cache
+/logs
+/wandb
+/.idea

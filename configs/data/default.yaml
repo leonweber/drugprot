@@ -1,0 +1,2 @@
+finetune: null
+predict: data/drugprot/dev.bioc.xml
