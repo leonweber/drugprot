@@ -1,5 +1,9 @@
 # Project exclude paths
 /data/training_brat/
+/data/eu_adr/brat
+/data/eu_adr/data
+/data/eu_adr/*.tgz
+/data/eu_adr/._euadr_corpus
 /analysis/*ann
 /analysis/*txt
 /analysis/.stats_cache

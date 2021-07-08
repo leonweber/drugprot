@@ -48,7 +48,8 @@ if __name__ == '__main__':
     pmid_to_text = {}
     pmid_to_entities = defaultdict(dict)
     pmid_to_relations = defaultdict(set)
-    data_getter = DataGetter(set(), skip_gene2pmid=True)
+    #data_getter = DataGetter(set(), skip_gene2pmid=True)
+    data_getter = DataGetter(set())
     collection = bioc.BioCCollection()
 
     with open(args.abstracts) as f:
