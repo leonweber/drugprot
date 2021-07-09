@@ -86,6 +86,34 @@ if __name__ == '__main__':
                 f_txt.write(doc.passages[0].text)
                 f_ann.writelines(anns)
                 f_ann.writelines(rels)
+            with (args.brat_out / "annotation.conf").open("w") as f:
+                f.write(
+                    """
+[entities]	 
+CHEMICAL
+GENE-Y
+GENE-N
+
+[relations]
+ACTIVATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+AGONIST Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+AGONIST-ACTIVATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+AGONIST-INHIBITOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+ANTAGONIST Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+DIRECT-REGULATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+INDIRECT-DOWNREGULATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+INDIRECT-UPREGULATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+INHIBITOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+PART-OF Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+PRODUCT-OF Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+SUBSTRATE Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+SUBSTRATE_PRODUCT-OF Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+
+[events]
+
+[attributes]
+                    """
+                )
 
     target_names = sorted(LABEL_TO_ID, key=lambda x: LABEL_TO_ID[x])
     print(classification_report(y_true=y_true, y_pred=y_pred, target_names=target_names))

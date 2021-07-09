@@ -1,10 +1,9 @@
 import logging
+import os.path
 import warnings
 from typing import List, Sequence
 
 import pytorch_lightning as pl
-import rich.syntax
-import rich.tree
 import wandb
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.loggers.wandb import WandbLogger
@@ -98,6 +97,7 @@ def print_config(
         be printed and in what order.
         resolve (bool, optional): Whether to resolve reference fields of DictConfig.
     """
+    import rich
 
     style = "dim"
     tree = rich.tree.Tree(":gear: CONFIG", style=style, guide_style=style)
@@ -125,7 +125,7 @@ def log_hyperparameters(
     model: pl.LightningModule,
     trainer: pl.Trainer,
     callbacks: List[pl.Callback],
-    logger: List[pl.loggers.LightningLoggerBase],
+    log,
 ) -> None:
     """This method controls which parameters from Hydra config are saved by Lightning loggers.
 
@@ -141,6 +141,7 @@ def log_hyperparameters(
     hparams["batch_size"] = config["batch_size"]
     hparams["finetune_trainer"] = config["finetune_trainer"]
     hparams["data"] = config["data"]
+    hparams["out_dir"] = os.path.abspath(os.getcwd())
     if "callbacks" in config:
         hparams["callbacks"] = config["callbacks"]
 

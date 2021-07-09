@@ -29,6 +29,7 @@ data_dir: ${work_dir}/data/
 # (this is placed here just for easier access from command line)
 debug: False
 
+
 # pretty print config at the start of the run using Rich library
 print_config: True
 
@@ -36,3 +37,4 @@ print_config: True
 ignore_warnings: True
 
 batch_size: 8
+optimized_metric: val/f1
