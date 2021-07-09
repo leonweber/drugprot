@@ -1,13 +1,19 @@
 import logging
 import os.path
 import warnings
-from typing import List, Sequence
-
+import tempfile
 import pytorch_lightning as pl
 import wandb
+import re
+import requests
+import shutil
+
 from omegaconf import DictConfig, OmegaConf
+from pathlib import Path
 from pytorch_lightning.loggers.wandb import WandbLogger
 from pytorch_lightning.utilities import rank_zero_only
+from typing import List, Sequence
+from tqdm import tqdm
 
 
 def get_logger(name=__name__, level=logging.INFO) -> logging.Logger:
@@ -176,3 +182,41 @@ def finish(
     for lg in logger:
         if isinstance(lg, WandbLogger):
             wandb.finish()
+
+
+def download_file(url: str, cache_dir: Path) -> Path:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = re.sub(r".+/", "", url)
+    # get cache path to put the file
+    cache_path = cache_dir / filename
+
+    if cache_path.exists():
+        print(f"File {cache_path.name} already exists in cache!")
+        return cache_path
+
+    print(f"Downloading {url}")
+    # Download to temporary file, then copy to cache dir once finished.
+    # Otherwise you get corrupt cache entries if the download gets interrupted.
+    fd, temp_filename = tempfile.mkstemp()
+
+    # GET file object
+    req = requests.get(url, stream=True)
+    content_length = req.headers.get("Content-Length")
+    total = int(content_length) if content_length is not None else None
+    progress = tqdm(unit="B", total=total)
+    with open(temp_filename, "wb") as temp_file:
+        for chunk in req.iter_content(chunk_size=1024):
+            if chunk:  # filter out keep-alive new chunks
+                progress.update(len(chunk))
+                temp_file.write(chunk)
+
+    progress.close()
+
+    shutil.copyfile(temp_filename, str(cache_path))
+    os.close(fd)
+    os.remove(temp_filename)
+
+    progress.close()
+
+    return Path(cache_path)
