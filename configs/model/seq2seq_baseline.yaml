@@ -1,0 +1,4 @@
+_target_: drugprot.models.seq2seq_baseline.Seq2SeqBaseline
+
+transformer: razent/SciFive-base-Pubmed
+lr: 5e-5

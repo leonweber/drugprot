@@ -31,16 +31,16 @@ LABEL_TO_ID = {
     "SUBSTRATE": 12,
     "SUBSTRATE_PRODUCT-OF": 13,
     # ChemProt extra (not in DrugProt)
-    # "COFACTOR": 14,
-    # "DOWNREGULATOR": 15,
-    # "INDIRECT-REGULATOR": 16,
-    # "MODULATOR": 17,
-    # "MODULATOR-ACTIVATOR": 18,
-    # "MODULATOR-INHIBITOR": 19,
-    # "NOT": 20,
-    # "REGULATOR": 21,
-    # "UNDEFINED": 22,
-    # "UPREGULATOR": 23,
+    "COFACTOR": 14,
+    "DOWNREGULATOR": 15,
+    "INDIRECT-REGULATOR": 16,
+    "MODULATOR": 17,
+    "MODULATOR-ACTIVATOR": 18,
+    "MODULATOR-INHIBITOR": 19,
+    "NOT": 20,
+    "REGULATOR": 21,
+    "UNDEFINED": 22,
+    "UPREGULATOR": 23,
 }
 
 ID_TO_LABEL = {v: k for k, v in LABEL_TO_ID.items()}

@@ -4,7 +4,7 @@
 defaults:
   - trainer: minimal.yaml
   - finetune_trainer: minimal.yaml
-  - model: entity_marker_baseline.yaml
+  - model: seq2seq_baseline.yaml
   - data: drugprot_only.yaml
   - callbacks: default.yaml # set this to null if you don't want to use callbacks
   - logger: wandb # set logger here or use command line (e.g. `python run.py logger=wandb`)

@@ -48,7 +48,7 @@ if __name__ == '__main__':
     pmid_to_text = {}
     pmid_to_entities = defaultdict(dict)
     pmid_to_relations = defaultdict(set)
-    data_getter = DataGetter(set(), skip_gene2pmid=True)
+    #data_getter = DataGetter(set(), skip_gene2pmid=True)
     collection = bioc.BioCCollection()
 
     with open(args.abstracts) as f:
@@ -73,7 +73,8 @@ if __name__ == '__main__':
     with open(args.relations) as f:
         for line in f:
             fields = line.strip().split("\t")
-            pmid, rel_type, arg1, arg2 = fields
+            #pmid, rel_type, arg1, arg2 = fields
+            pmid, _, _, rel_type, arg1, arg2 = fields
             ent1 = arg1.split(":")[1]
             ent2 = arg2.split(":")[1]
             pmid_to_relations[pmid].add((rel_type, ent1, ent2))
