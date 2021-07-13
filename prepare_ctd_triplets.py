@@ -1,53 +1,12 @@
 import pandas as pd
-import os
 import shutil
 import gzip
-import tempfile
-import requests
-import re
 
 from pathlib import Path
-
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-
-def download_file(url: str, cache_dir: Path):
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    filename = re.sub(r".+/", "", url)
-    # get cache path to put the file
-    cache_path = cache_dir / filename
-    print(cache_path)
-
-    if cache_path.exists():
-        print("File already exists in cache!")
-        return cache_path
-
-    # Download to temporary file, then copy to cache dir once finished.
-    # Otherwise you get corrupt cache entries if the download gets interrupted.
-    fd, temp_filename = tempfile.mkstemp()
-
-    # GET file object
-    req = requests.get(url, stream=True)
-    content_length = req.headers.get("Content-Length")
-    total = int(content_length) if content_length is not None else None
-    progress = tqdm(unit="B", total=total)
-    with open(temp_filename, "wb") as temp_file:
-        for chunk in req.iter_content(chunk_size=1024):
-            if chunk:  # filter out keep-alive new chunks
-                progress.update(len(chunk))
-                temp_file.write(chunk)
-
-    progress.close()
-
-    shutil.copyfile(temp_filename, str(cache_path))
-    os.close(fd)
-    os.remove(temp_filename)
-
-    progress.close()
-
-    return Path(cache_path)
+from drugprot.utils import download_file
 
 
 def encode_dataset_for_dgl_ke(ctd_file: Path, output_dir: Path):
@@ -64,7 +23,7 @@ def encode_dataset_for_dgl_ke(ctd_file: Path, output_dir: Path):
     entity_file = output_dir / "entities.dict"
     with entity_file.open("w") as e_writer:
         for i, entity in enumerate(entities):
-            e_writer.write(entity + " " + str(i) + "\n")
+            e_writer.write(entity + "\t" + str(i) + "\n")
             entity_to_id[entity] = i
 
     print("Encoding relations")
@@ -74,7 +33,7 @@ def encode_dataset_for_dgl_ke(ctd_file: Path, output_dir: Path):
     relation_file = output_dir / "relation.dict"
     with relation_file.open("w") as r_writer:
         for i, relation in enumerate(relations):
-            r_writer.write(relation + " " + str(i) + "\n")
+            r_writer.write(relation + "\t" + str(i) + "\n")
             relation_to_id[relation] = i
 
     print("Encoding triplets")
@@ -86,7 +45,8 @@ def encode_dataset_for_dgl_ke(ctd_file: Path, output_dir: Path):
                 head_id = entity_to_id[row["head"]]
                 tail_id = entity_to_id[row["tail"]]
                 relation_id = relation_to_id[row["relation"]]
-                writer.write(" ".join([str(head_id), str(relation_id), str(tail_id)]) + "\n")
+                writer.write("\t".join([str(head_id), str(relation_id), str(tail_id)]) + "\n")
+
 
 def gunzip(file_path: Path, output_path: Path):
     with gzip.open(file_path,"rb") as f_in, open(output_path, "wb") as f_out:
@@ -106,7 +66,7 @@ if not ctd_file.exists():
 columns = ["ChemicalName", "ChemicalID", "CasRN", "GeneSymbol", "GeneID", "GeneForms",
            "Organism", "OrganismID", "Interaction", "InteractionActions", "PubMedIDs"]
 ctd_data = pd.read_csv(ctd_file, sep="\t", comment="#", names=columns)
-print(len(ctd_data))
+print(f"Found {len(ctd_data)} entries in ctd")
 
 triplet_file = ctd_dir / "triplets.tsv"
 if not triplet_file.exists():
@@ -124,7 +84,7 @@ if not triplet_file.exists():
 
         for int_action in interactions:
             int_action = int_action.replace(" ", "-").strip()
-            triplet_writer.write("\t".join([chem_id, target_id, int_action]) + "\n")
+            triplet_writer.write("\t".join([chem_id, int_action, target_id]) + "\n")
             num_triplets += 1
 
     triplet_writer.flush()
