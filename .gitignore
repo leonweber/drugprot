@@ -6,3 +6,6 @@
 /logs
 /wandb
 /.idea
+
+.spyderproject
+
