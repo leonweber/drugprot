@@ -37,7 +37,7 @@ def encode_dataset_for_dgl_ke(ctd_file: Path, output_dir: Path):
             relation_to_id[relation] = i
 
     print("Encoding triplets")
-    train_data, test_data, _, _ = train_test_split(data, data["relation"], train_size=0.9)
+    train_data, test_data, _, _ = train_test_split(data, data["relation"], train_size=0.9, random_state=42)
     for split_file, split_data in [("train.tsv", train_data), ("valid.tsv", test_data)]:
         triplet_file = output_dir / split_file
         with triplet_file.open("w", encoding="utf8") as writer:
