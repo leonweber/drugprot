@@ -1,4 +1,5 @@
 # Project exclude paths
+__pycache__
 /data/training_brat/
 /data/ctd/
 /data/embeddings/
@@ -11,4 +12,4 @@
 /.idea
 .sync_exclude
 .sync_ignore
-drugprot/__pycache__/
+.spyderproject
