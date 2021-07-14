@@ -1,8 +1,14 @@
 # Project exclude paths
 /data/training_brat/
+/data/ctd/
+/data/embeddings/
+/data/pubtator/
 /analysis/*ann
 /analysis/*txt
 /analysis/.stats_cache
 /logs
 /wandb
 /.idea
+.sync_exclude
+.sync_ignore
+drugprot/__pycache__/
