@@ -2,6 +2,7 @@
 /data/training_brat/
 /data/embeddings/
 /data/ctd/
+/data/pubtator/
 /analysis/*ann
 /analysis/*txt
 /analysis/.stats_cache
