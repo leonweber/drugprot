@@ -1,7 +1,8 @@
 # Project exclude paths
+__pycache__
 /data/training_brat/
-/data/embeddings/
 /data/ctd/
+/data/embeddings/
 /data/pubtator/
 /analysis/*ann
 /analysis/*txt
@@ -9,7 +10,6 @@
 /logs
 /wandb
 /.idea
-__pycache__
 .sync_exclude
 .sync_ignore
-
+.spyderproject
