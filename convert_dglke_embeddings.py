@@ -18,6 +18,7 @@ def convert_dglke_embeddings(emb_file: Path, data_dir: Path, output_dir: Path):
     pickle.dump(torch_data, entity_emb_file.open("wb"))
 
     shutil.copyfile(data_dir / "entities.dict", output_dir / "entities.dict")
+    shutil.copyfile(data_dir / "relation.dict", output_dir / "relation.dict")
 
 
 if __name__ == "__main__":
