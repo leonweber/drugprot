@@ -130,8 +130,6 @@ def log_hyperparameters(
     config: DictConfig,
     model: pl.LightningModule,
     trainer: pl.Trainer,
-    callbacks: List[pl.Callback],
-    log,
 ) -> None:
     """This method controls which parameters from Hydra config are saved by Lightning loggers.
 
