@@ -86,7 +86,6 @@ def train(config: DictConfig) -> Optional[float]:
             config=config,
             model=model,
             trainer=trainer,
-            callbacks=callbacks,
         )
 
         train_loader = DataLoader(

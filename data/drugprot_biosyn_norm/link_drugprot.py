@@ -86,7 +86,7 @@ def main(args):
     
     tpp = TextPreprocess()
     
-    for doc in collection.documents[:1]:
+    for doc in collection.documents:
         for p in doc.passages:
             for sent in p.sentences:
                 annotations = copy.deepcopy(sent.annotations)
