@@ -10,8 +10,9 @@ work_dir: ${hydra:runtime.cwd}
 
 # path to folder with data
 data_dir: ${work_dir}/data/
-emb_dir: ${data_dir}/embeddings/
-emb_model: pubtator_embeddings
+#emb_dir: ${data_dir}/embeddings/
+emb_dir: /glusterfs/dfs-gfs-dist/saengema-pub/drugprot/embeddings
+emb_model: DistMult_full_200
 
 # use `python run.py debug=true` for easy debugging!
 # this will run 1 train, val and test loop with only 1 batch
