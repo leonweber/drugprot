@@ -1,3 +1,4 @@
+## Run baseline model
 ```bash
 (drugprot) guppi5 weberple 40 ( drugprot ) $ python -m drugprot.train data.train=null data.checkpoint="/glusterfs/dfs-gfs-dist/weberple-pub/drugprot/entity_marker_baseline.ckpt"
 F1: 0.78: 100%|██████████████████████████████████████████████████████████████████████████████████| 750/750 [00:34<00:00, 21.45it/s]
@@ -28,3 +29,20 @@ INDIRECT-DOWNREGULATOR       0.79      0.79      0.79       332
            samples avg       0.66      0.66      0.66      3760
 ```
 The brat files for error analysis can then be found in `analysis`
+
+## Entity pair classification
+To (re-) generate the classification training and development files run:
+```bash
+python -m drugprot.bioc_to_cl_data \
+  --input_bioc data/drugprot_biosyn_norm/train.bioc.xml \
+  --output data/drugprot_entity/train.tsv
+  
+python -m drugprot.bioc_to_cl_data \
+  --input_bioc data/drugprot_biosyn_norm/dev.bioc.xml \
+  --output data/drugprot_entity/dev.tsv
+```
+
+To train the baseline entity classification model run:
+```bash
+
+```

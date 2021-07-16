@@ -117,6 +117,7 @@ if __name__ == "__main__":
 
     dglke_dir = ctd_dir / "dgl_ke"
     encode_dataset_for_dgl_ke(triplet_file, 0.9, dglke_dir, 42)
+
     dglke_dir = ctd_dir / "dgl_ke_full"
     encode_dataset_for_dgl_ke(triplet_file, 1.0, dglke_dir, 42)
 

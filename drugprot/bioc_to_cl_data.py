@@ -77,8 +77,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_bioc", type=Path, required=True,
                         help="Path to the input bioc file")
-    parser.add_argument("--output_file", type=Path, required=True,
+    parser.add_argument("--output", type=Path, required=True,
                         help="Path to the output file")
     args = parser.parse_args()
 
-    prepare_data(args.input_bioc, args.output_file)
+    prepare_data(args.input_bioc, args.output)

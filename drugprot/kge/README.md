@@ -1,10 +1,12 @@
 ## Preparation of CTD database triplets
 To prepare triplets from the CTD database run:
 ```bash
-python prepare_ctd_triplets.py
+python -m drugprot.kge.prepare_ctd
 ```
 This will download the necessary data files from the CTD website and store the prepared triplets 
-as well as the entity and relation dictionary in the folder `data/ctd/dgl_ke/`.
+as well as the entity and relation dictionary in the folder `data/ctd/dgl_ke/` resp. `data/ctd/dgl_ke_full/`.
+The former will have a real train / validation split whereas the latter contains all triplets in the 
+train set and a random sample as validation split.
 
 
 ## KG-Embedding Framework
@@ -48,3 +50,9 @@ CUDA_VISIBLE_DEVICES=0 DGLBACKEND=pytorch dglke_train --model_name RESCAL \
 --batch_size_eval 16 -adv --regularization_coef 1.00E-09 --num_thread 1 --num_proc 1 --valid --gpu 0 --test
 ```
 
+## Convert the DGL-KE embeddings
+To convert the generated embeddings to torch tensors (and calculate and add the DRUG-UNK/GENE-UNK embeddings) run:
+```bash
+python -m drugprot.kge.convert_dglke_embs --emb_file ckpts/DistMult_dgl_ke_7/dgl_ke_DistMult_entity.npy \
+  --data_dir data/ctd/dgl_ke --output_dir data/embeddings/dist_mult
+```
