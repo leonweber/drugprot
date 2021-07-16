@@ -1,22 +1,9 @@
 import argparse
 
 from pathlib import Path
-from typing import Dict
 from tqdm import tqdm
 
-
-def read_vocab(vocab_file: Path) -> Dict[str, int]:
-    print(f"Reading vocabulary from {vocab_file}")
-
-    concept_to_id = {}
-    with vocab_file.open("r", encoding="utf8") as reader:
-        for line in reader.readlines():
-            key, value = line.strip().split("\t")
-            concept_to_id[key] = value
-
-    print(f"Found {len(concept_to_id)} vocab entries")
-    return concept_to_id
-
+from drugprot.utils import read_vocab
 
 def prepare_data(input_file: Path, entity_dict_file: Path, relation_dict_file: Path, output_dir: Path):
     entity_to_id = read_vocab(entity_dict_file)

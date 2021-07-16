@@ -7,7 +7,7 @@ mkdir -p $OUTPUT_DIR
 rm -rf $OUTPUT_DIR/*
 
 echo "Start preparing input pairs"
-python prepare_prediction_file.py \
+python -m drugprot.kge.prepare_pred_file \
   --input_pairs $INPUT_PAIR_FILE \
   --entity_dict $MODEL_CKPT_DIR/entities.dict \
   --relation_dict $MODEL_CKPT_DIR/relation.dict \
@@ -26,7 +26,7 @@ CUDA_VISIBLE_DEVICES=$DEVICE DGLBACKEND=pytorch dglke_predict \
   --output $OUTPUT_DIR/result.tsv
 
 echo "Start aggregating prediction results"
-python aggregate_prediction_result.py \
+python -m drugprot.kge.aggregate_results.py \
   --result $OUTPUT_DIR/result.tsv \
   --entity_dict $MODEL_CKPT_DIR/entities.dict \
   --relation_dict $MODEL_CKPT_DIR/relation.dict \

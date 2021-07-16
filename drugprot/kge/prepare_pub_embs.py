@@ -61,7 +61,9 @@ def map_drug_embeddings(drug_emb_file: Path, drug_to_id: Dict[str, int], drug_to
     for i, drug_id in tqdm(enumerate(mappable_drugs), total=num_mappable_drugs):
         drug_index = drug_to_id[drug_id]
         new_embeddings[i] = drug_embeddings[drug_index]
-        new_mapping[drug_id] = i
+
+        mesh_id = drug_to_mesh[drug_id]
+        new_mapping[mesh_id] = i
 
     return new_mapping, torch.tensor(new_embeddings)
 
@@ -100,7 +102,7 @@ def save(dictionary: Dict[str, int], embeddings: Tensor, output_dir: Path):
         for key, value in dictionary.items():
             writer.write("\t".join([key, str(value)]) + "\n")
 
-    emb_file = output_dir / "entity_embeddings.pkl"
+    emb_file = output_dir / "embeddings.pkl"
     pickle.dump(embeddings, emb_file.open("wb"))
 
 
@@ -125,6 +127,10 @@ gene_to_id = read_vocabulary(gene_vocab_file)
 gene_emb_file = pubtator_dir / "gene-v2000.bin"
 gene_embeddings = read_embeddings(gene_emb_file)
 
+mean_gene_embedding = torch.mean(gene_embeddings, dim=0, keepdim=True)
+gene_embeddings = torch.cat([gene_embeddings, torch.tensor(mean_gene_embedding)], dim=0)
+gene_to_id["GENE-UNK"] = len(gene_to_id)
+
 drug_vocab_file = pubtator_dir / "drug-v0500.vocab"
 drug_to_id = read_vocabulary(drug_vocab_file)
 
@@ -133,13 +139,17 @@ drug_emb_file = pubtator_dir / "drug-v2000.bin"
 
 drug_to_id, drug_embeddings = map_drug_embeddings(drug_emb_file, drug_to_id, drug_to_mesh)
 
+mean_drug_embedding = torch.mean(drug_embeddings, dim=0, keepdim=True)
+drug_embeddings = torch.cat([drug_embeddings, mean_drug_embedding], dim=0)
+drug_to_id["DRUG-UNK"] = len(drug_to_id)
+
 entity_to_id, entity_embeddings = combine_embeddings([drug_to_id, gene_to_id], [drug_embeddings, gene_embeddings])
 
 print("Perform drug sanity checks")
-perform_sanity_check(drug_to_id, drug_embeddings, entity_to_id, entity_embeddings, len(drug_to_id))
+perform_sanity_check(drug_to_id, drug_embeddings, entity_to_id, entity_embeddings, int(len(drug_to_id) / 10.0))
 
 print("Perform gene sanity checks")
-perform_sanity_check(gene_to_id, gene_embeddings, entity_to_id, entity_embeddings, int(len(gene_to_id) / 22.5))
+perform_sanity_check(gene_to_id, gene_embeddings, entity_to_id, entity_embeddings, int(len(gene_to_id) / 50))
 
 max_entity_id = max(entity_to_id.values())
 assert entity_embeddings[max_entity_id] is not None
