@@ -44,5 +44,5 @@ python -m drugprot.bioc_to_cl_data \
 
 To train the baseline entity classification model run:
 ```bash
-
+python -m drugprot.train_classifier -m model.lr=0.01,0.001 model.emb_trainable=true trainer=entity_gpu.yaml
 ```
