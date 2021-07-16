@@ -34,7 +34,8 @@ def prepare_data(input_bioc: Path, output_file: Path):
                     elif type.startswith("GENE"):
                         first_id = entity[2].split("|")[0]
                         if first_id.isnumeric():
-                            entity[2] = first_id #FIXME:!
+                            # FIXME: Add better handling of entries with multiple ids!
+                            entity[2] = first_id
                             genes[entity[0]] = entity
                             num_genes += 1
                         else:

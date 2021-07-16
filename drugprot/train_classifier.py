@@ -46,13 +46,16 @@ def train_classifier(config: DictConfig) -> Optional[float]:
         )
 
     if config["data"]["train_file"]:
+        use_unk = config["data"]["use_unk"]
+        use_none = config["data"]["use_none"]
+
         # Load train and dev data
         train_data_raw = pd.read_csv(config["data"]["train_file"], sep="\t")
-        train_data = EntityInteractionDataSet(train_data_raw, entity_to_id)
+        train_data = EntityInteractionDataSet(train_data_raw, entity_to_id, use_unk, use_none)
         log.info(f"Training data set contains {len(train_data)} instances")
 
         dev_data_raw = pd.read_csv(config["data"]["dev_file"], sep="\t")
-        dev_data = EntityInteractionDataSet(dev_data_raw, entity_to_id)
+        dev_data = EntityInteractionDataSet(dev_data_raw, entity_to_id, use_unk, use_none)
         log.info(f"Dev data set contains {len(dev_data)} instances")
 
         # Init Lightning callbacks

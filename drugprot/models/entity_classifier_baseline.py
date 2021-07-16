@@ -9,6 +9,9 @@ from typing import List, Dict, Optional
 from torch import Tensor
 from torch.utils.data import Dataset
 
+from drugprot import utils
+
+log = utils.get_logger(__name__)
 
 LABEL_TO_ID = {
     # DrugProt
@@ -33,8 +36,8 @@ ID_TO_LABEL = {v: k for k, v in LABEL_TO_ID.items()}
 
 class EntityInteractionDataSet(Dataset):
 
-    def __init__(self, data: DataFrame, entity_dict: Dict[str, int]):
-        self.examples = self.data_to_examples(data, entity_dict)
+    def __init__(self, data: DataFrame, entity_dict: Dict[str, int], use_unk: bool, use_none: bool):
+        self.examples = self.data_to_examples(data, entity_dict, use_unk, use_none)
 
     def __len__(self):
         return len(self.examples)
@@ -43,8 +46,9 @@ class EntityInteractionDataSet(Dataset):
         return self.examples[idx]
 
     @staticmethod
-    def data_to_examples(data: DataFrame, entity_dict: Dict[str, int]):
+    def data_to_examples(data: DataFrame, entity_dict: Dict[str, int], use_unk: bool, use_none:bool):
         examples = []
+
         num_missing_heads = 0
         num_missing_tails = 0
 
@@ -52,21 +56,23 @@ class EntityInteractionDataSet(Dataset):
             head_entity = row["head"]
             if head_entity not in entity_dict:
                 num_missing_heads += 1
-                continue
-
-            head = entity_dict[head_entity]
+                head_entity = "DRUG-UNK" if use_unk else None
 
             tail_entity = row["tail"]
             if tail_entity not in entity_dict:
                 num_missing_tails += 1
+                tail_entity = "GENE-UNK" if use_unk else None
+
+            if head_entity is None or tail_entity is None:
                 continue
 
+            head = entity_dict[head_entity]
             tail = entity_dict[tail_entity]
 
             relations_enc = np.zeros(len(LABEL_TO_ID))
             relations = row["relations"]
-            if type(relations) == float:
-                relations = []
+            if type(relations) == float: # Strange pandas issue - nan will be type float
+                relations = ["NONE"] if use_none else []
             else:
                 relations = relations.split("|")
 
@@ -79,13 +85,14 @@ class EntityInteractionDataSet(Dataset):
                 "labels": relations_enc
             })
 
-        print(f"Missing heads: {num_missing_heads}")
-        print(f"Missing tails: {num_missing_tails}")
+        log.info(f"Data set size: {len(examples)}")
+        log.info(f"Missing heads: {num_missing_heads}")
+        log.info(f"Missing tails: {num_missing_tails}")
 
         return examples
 
 
-class ClassifierOutput():
+class ClassifierOutput:
 
     def __init__(self, logits: torch.FloatTensor, loss: Optional[torch.FloatTensor] = None):
         self.logits = logits
@@ -215,5 +222,9 @@ class MultiLabelClassificationNetwork(pl.LightningModule):
             return nn.SELU()
         elif name == "sigmoid":
             return nn.Sigmoid()
+        elif name == "elu":
+            return nn.ELU()
+        elif name == "lrelu":
+            return nn.LeakyReLU()
         else:
             raise NotImplementedError(f"Unsupported activation {name}")

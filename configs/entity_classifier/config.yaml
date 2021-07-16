@@ -37,6 +37,8 @@ data:
   checkpoint: null
   train_file: ${data_dir}/drugprot_entity/train.tsv
   dev_file: ${data_dir}/drugprot_entity/dev.tsv
+  use_unk: true                 # Indicates whether to use DRUG-UNK/GENE-UNK for unknown entities
+  use_none: false               # Indicates whether to use the None class
 
 batch_size: 16
 optimized_metric: val/f1
