@@ -1,0 +1,67 @@
+
+defaults:
+  - trainer: entity_cpu.yaml
+
+# path to original working directory
+# hydra hijacks working directory by changing it to the current log directory,
+# so it's useful to have this path as a special variable
+# learn more here: https://hydra.cc/docs/next/tutorials/basic/running_your_app/working_directory
+work_dir: ${hydra:runtime.cwd}
+
+# path to folder with data
+data_dir: ${work_dir}/data/
+emb_dir: ${data_dir}/embeddings/
+emb_model: pubtator_embeddings
+
+# use `python run.py debug=true` for easy debugging!
+# this will run 1 train, val and test loop with only 1 batch
+# equivalent to running `python run.py trainer.fast_dev_run=true`
+# (this is placed here just for easier access from command line)
+debug: False
+
+# pretty print config at the start of the run using Rich library
+print_config: True
+
+# disable python warnings if they annoy you
+ignore_warnings: True
+
+model:
+  _target_: drugprot.models.entity_classifier_baseline.MultiLabelClassificationNetwork
+  hidden_sizes: [ 1000, 500 ]
+  activation: null
+  emb_trainable: false
+  lr: 0.01
+  l1_lambda: 0.0
+
+data:
+  checkpoint: null
+  train_file: ${data_dir}/drugprot_entity/train.tsv
+  dev_file: ${data_dir}/drugprot_entity/dev.tsv
+
+batch_size: 16
+optimized_metric: val/f1
+
+embeddings:
+  dict_file: ${emb_dir}/${emb_model}/entities.dict
+  emb_file: ${emb_dir}/${emb_model}/embeddings.pkl
+
+callbacks:
+  model_checkpoint:
+    _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    monitor: "val/f1" # name of the logged metric which determines when model is improving
+    save_top_k: 1 # save k best models (determined by above metric)
+    save_last: True # additionaly always save model from last epoch
+    mode: "max" # can be "max" or "min"
+    verbose: False
+    dirpath: "checkpoints/"
+    filename: "{epoch:02d}"
+
+logger:
+  comet:
+    _target_: pytorch_lightning.loggers.comet.CometLogger
+    api_key: ${oc.env:COMET_API_TOKEN} # api key is laoded from environment variable
+    project_name: "drugprot"
+    experiment_name: null
+
+
+

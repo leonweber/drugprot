@@ -12,7 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 from pytorch_lightning.loggers.wandb import WandbLogger
 from pytorch_lightning.utilities import rank_zero_only
-from typing import List, Sequence
+from typing import List, Sequence, Dict
 from tqdm import tqdm
 
 
@@ -143,7 +143,10 @@ def log_hyperparameters(
     hparams["trainer"] = config["trainer"]
     hparams["model"] = config["model"]
     hparams["batch_size"] = config["batch_size"]
-    hparams["finetune_trainer"] = config["finetune_trainer"]
+
+    if "finetune_trainer" in config:
+        hparams["finetune_trainer"] = config["finetune_trainer"]
+
     hparams["data"] = config["data"]
     hparams["out_dir"] = os.path.abspath(os.getcwd())
     if "callbacks" in config:
@@ -218,3 +221,16 @@ def download_file(url: str, cache_dir: Path) -> Path:
     progress.close()
 
     return Path(cache_path)
+
+
+def read_vocab(vocab_file: Path) -> Dict[str, int]:
+    print(f"Reading vocabulary from {vocab_file}")
+
+    concept_to_id = {}
+    with vocab_file.open("r", encoding="utf8") as reader:
+        for line in reader.readlines():
+            key, value = line.strip().split("\t")
+            concept_to_id[key] = int(value)
+
+    print(f"Found {len(concept_to_id)} vocab entries")
+    return concept_to_id
