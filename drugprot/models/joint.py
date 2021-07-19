@@ -19,7 +19,6 @@ from drugprot.models.entity_marker_baseline import insert_pair_markers
 
 log = utils.get_logger(__name__)
 
-pl.seed_everything(42)
 
 LABEL_TO_ID = {
     # DrugProt
@@ -148,8 +147,12 @@ class JointModel(pl.LightningModule):
         self.dropout = nn.Dropout(self.transformer.config.hidden_dropout_prob)
         self.cuid_pair_classifier = nn.Linear(self.transformer.config.hidden_size * 2,
                                     len(LABEL_TO_ID))
-        self.mention_pair_classifier = nn.Linear(self.transformer.config.hidden_size * 2,
-                                    len(LABEL_TO_ID))
+        self.mention_pair_classifier = nn.Sequential(
+            nn.Linear(self.transformer.config.hidden_size * 4, self.transformer.config.hidden_size),
+            nn.ReLU(),
+            self.dropout,
+            nn.Linear(self.transformer.config.hidden_size, len(LABEL_TO_ID))
+        )
         self.train_f1 = torchmetrics.F1(num_classes=len(LABEL_TO_ID))
         self.dev_f1 = torchmetrics.F1(num_classes=len(LABEL_TO_ID))
         self.lr = lr
@@ -169,7 +172,7 @@ class JointModel(pl.LightningModule):
             features["input_ids"] == self.tokenizer.convert_tokens_to_ids("[TAIL-S]"))
         head_reps = seq_emb[head_idx]
         tail_reps = seq_emb[tail_idx]
-        mention_pairs = torch.cat([head_reps, tail_reps], dim=1)
+        mention_pair_reps = torch.cat([head_reps, tail_reps], dim=1)
 
         cuid_pair_labels = torch.zeros((features["pair_ids"].max()+1, len(LABEL_TO_ID)),
                                        device=self.device)
@@ -179,11 +182,16 @@ class JointModel(pl.LightningModule):
 
         cuid_pair_reps = []
         for i, _ in enumerate(cuid_pair_labels):
-            cuid_pair_reps.append(mention_pairs[features["pair_ids"] == i].mean(dim=0))
+            cuid_pair_reps.append(mention_pair_reps[features["pair_ids"] == i].mean(dim=0))
         cuid_pair_reps = torch.stack(cuid_pair_reps)
 
+        combined_mention_reps = torch.cat(
+            [mention_pair_reps, cuid_pair_reps[features["pair_ids"]]], dim=1
+        )
+
         cuid_pair_logits = self.cuid_pair_classifier(cuid_pair_reps)
-        mention_pair_logits = self.mention_pair_classifier(mention_pairs)
+        mention_pair_logits = self.mention_pair_classifier(combined_mention_reps)
+
         if "labels" in features:
             cuid_pair_loss = self.loss(cuid_pair_logits, cuid_pair_labels)
             mention_pair_loss = self.loss(mention_pair_logits, features["labels"])

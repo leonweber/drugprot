@@ -166,6 +166,18 @@ def log_hyperparameters(
     # since we already did that above
     trainer.logger.log_hyperparams = empty
 
+def init(
+        config: DictConfig,
+        model: pl.LightningModule,
+        trainer: pl.Trainer,
+        callbacks: List[pl.Callback],
+        logger: List[pl.loggers.LightningLoggerBase],
+):
+    for lg in logger:
+        if isinstance(lg, WandbLogger):
+            lg.experiment.define_metric("train/f1", summary="max")
+            lg.experiment.define_metric("val/f1", summary="max")
+
 
 def finish(
     config: DictConfig,
