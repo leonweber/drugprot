@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Optional, List
 
 import bioc
@@ -10,6 +11,7 @@ from pytorch_lightning import LightningModule
 from torch.utils.data import DataLoader, ConcatDataset
 
 from drugprot import utils
+from drugprot.multitask_data import MultiTaskDataset, MultiTaskBatchSampler
 
 log = utils.get_logger(__name__)
 
@@ -32,113 +34,133 @@ def train(config: DictConfig) -> Optional[float]:
 
     log.info(config)
 
-    # Init Lightning model
-    log.info(f"Instantiating model <{config.model._target_}>")
+    dataset_to_label_to_id = {}
+    for data_path in config["data"]["train"]:
+        name = Path(data_path).parent.name
+        dataset_to_label_to_id[name] = utils.get_label_dicts(data_path)[0]
 
-    model: LightningModule = hydra.utils.instantiate(config.model)
-
+    model: LightningModule = hydra.utils.instantiate(config.model,
+                                                     dataset_to_label_to_id=dataset_to_label_to_id)
     if config["data"]["checkpoint"]:
         model = model.load_from_checkpoint(
             hydra.utils.to_absolute_path(config["data"]["checkpoint"]),
             **config["model"]
         )
 
-    trainer = None
-    if config["data"]["train"]:
-        train_data = ConcatDataset(
-            [
-                model.get_dataset(i, limit_examples=config["data"]["limit_examples"])
-                for i in config["data"]["train"]
-            ]
+    train_datasets = [
+            model.get_dataset(i, limit_examples=config["data"]["limit_examples"])
+            for i in config["data"]["train"]
+        ]
+    dev_data = model.get_dataset(
+        config["data"]["dev"], limit_examples=config["data"]["limit_examples"]
+    )
+
+    # Init Lightning model
+    log.info(f"Instantiating model <{config.model._target_}>")
+
+
+
+    # Init Lightning callbacks
+    callbacks: List[pl.Callback] = []
+    if "callbacks" in config:
+        for _, cb_conf in config["callbacks"].items():
+            if "_target_" in cb_conf:
+                log.info(f"Instantiating callback <{cb_conf._target_}>")
+                callbacks.append(hydra.utils.instantiate(cb_conf))
+
+    # Init Lightning loggers
+    logger: List[pl.LightningLoggerBase] = []
+    if "logger" in config:
+        for _, lg_conf in config["logger"].items():
+            if "_target_" in lg_conf:
+                log.info(f"Instantiating logger <{lg_conf._target_}>")
+                logger.append(hydra.utils.instantiate(lg_conf))
+
+    # Init Lightning trainer
+    log.info(f"Instantiating trainer <{config.trainer._target_}>")
+    trainer: pl.Trainer = hydra.utils.instantiate(
+        config.trainer,
+        callbacks=callbacks,
+        logger=logger,
+        _convert_="partial",
+    )
+
+    log.info("Initializing")
+    utils.init(
+        config=config,
+        model=model,
+        trainer=trainer,
+        callbacks=callbacks,
+        logger=logger,
+    )
+    utils.log_hyperparameters(
+        config=config,
+        model=model,
+        trainer=trainer,
+    )
+
+    train_dataset = MultiTaskDataset(datasets=train_datasets)
+    train_batch_sampler = MultiTaskBatchSampler(datasets=train_datasets,
+                                    batch_size=config["batch_size"],
+                                    mix_opt=0,
+                                    extra_task_ratio=0)
+
+    train_loader = DataLoader(
+        dataset=train_dataset,
+        collate_fn=model.collate_fn,
+        batch_sampler=train_batch_sampler
+    )
+
+    dev_dataset = MultiTaskDataset(datasets=[dev_data])
+    dev_batch_sampler = MultiTaskBatchSampler(datasets=[dev_data],
+                                             batch_size=config["batch_size"],
+                                             mix_opt=0,
+                                             extra_task_ratio=0)
+
+    dev_loader = DataLoader(
+        dataset=dev_dataset,
+        collate_fn=model.collate_fn,
+        batch_sampler=dev_batch_sampler
+    )
+
+    model.num_training_steps = len(train_loader) * trainer.max_epochs
+
+    # Train the model
+    log.info("Starting training!")
+    trainer.fit(
+        model=model, train_dataloader=train_loader, val_dataloaders=dev_loader
+    )
+    best_score = trainer.callback_metrics[config["optimized_metric"]]
+    log.info(
+        f"Best {config['optimized_metric']} (before finetuning): {best_score})"
+    )
+
+    if (
+        "finetune" in config["data"]
+        and config["data"]["finetune"]
+        and config["finetune_trainer"]
+    ):
+        finetune_data = ConcatDataset(
+            [model.get_dataset(i) for i in config["data"]["finetune"]]
         )
-        dev_data = model.get_dataset(
-            config["data"]["dev"], limit_examples=config["data"]["limit_examples"]
+        train_loader = DataLoader(
+            finetune_data,
+            batch_size=config["batch_size"],
+            shuffle=True,
+            collate_fn=model.collate_fn,
         )
-
-        # Init Lightning callbacks
-        callbacks: List[pl.Callback] = []
-        if "callbacks" in config:
-            for _, cb_conf in config["callbacks"].items():
-                if "_target_" in cb_conf:
-                    log.info(f"Instantiating callback <{cb_conf._target_}>")
-                    callbacks.append(hydra.utils.instantiate(cb_conf))
-
-        # Init Lightning loggers
-        logger: List[pl.LightningLoggerBase] = []
-        if "logger" in config:
-            for _, lg_conf in config["logger"].items():
-                if "_target_" in lg_conf:
-                    log.info(f"Instantiating logger <{lg_conf._target_}>")
-                    logger.append(hydra.utils.instantiate(lg_conf))
-
-        # Init Lightning trainer
-        log.info(f"Instantiating trainer <{config.trainer._target_}>")
-        trainer: pl.Trainer = hydra.utils.instantiate(
+        finetune_trainer: pl.Trainer = hydra.utils.instantiate(
             config.trainer,
             callbacks=callbacks,
             logger=logger,
             _convert_="partial",
         )
 
-        # Send some parameters from config to all lightning loggers
-        log.info("Logging hyperparameters!")
-        utils.log_hyperparameters(
-            config=config,
-            model=model,
-            trainer=trainer,
-        )
-
-        train_loader = DataLoader(
-            train_data,
-            batch_size=config["batch_size"],
-            shuffle=True,
-            collate_fn=model.collate_fn,
-        )
-        dev_loader = DataLoader(
-            dev_data,
-            batch_size=config["batch_size"],
-            shuffle=False,
-            collate_fn=model.collate_fn,
-        )
-
-        model.num_training_steps = len(train_loader) * trainer.max_epochs
-
-        # Train the model
-        log.info("Starting training!")
-        trainer.fit(
-            model=model, train_dataloader=train_loader, val_dataloaders=dev_loader
-        )
-        best_score = trainer.callback_metrics[config["optimized_metric"]]
+        finetune_trainer.fit(model=model, train_dataloader=train_loader)
+        best_score = finetune_trainer.callback_metrics[config["optimized_metric"]]
         log.info(
-            f"Best {config['optimized_metric']} (before finetuning): {best_score})"
+            f"Best {config['optimized_metric']} (after finetuning): {best_score})"
         )
-
-        if (
-            "finetune" in config["data"]
-            and config["data"]["finetune"]
-            and config["finetune_trainer"]
-        ):
-            finetune_data = ConcatDataset(
-                [model.get_dataset(i) for i in config["data"]["finetune"]]
-            )
-            train_loader = DataLoader(
-                finetune_data,
-                batch_size=config["batch_size"],
-                shuffle=True,
-                collate_fn=model.collate_fn,
-            )
-            finetune_trainer: pl.Trainer = hydra.utils.instantiate(
-                config.trainer,
-                callbacks=callbacks,
-                logger=logger,
-                _convert_="partial",
-            )
-
-            finetune_trainer.fit(model=model, train_dataloader=train_loader)
-            best_score = finetune_trainer.callback_metrics[config["optimized_metric"]]
-            log.info(
-                f"Best {config['optimized_metric']} (after finetuning): {best_score})"
-            )
 
         # Make sure everything closed properly
         log.info("Finalizing!")
@@ -158,7 +180,8 @@ def train(config: DictConfig) -> Optional[float]:
     if "predict" in config["data"] and config["data"]["predict"]:
         if trainer:
             model = model.load_from_checkpoint(
-                trainer.checkpoint_callback.best_model_path, **config["model"]
+                trainer.checkpoint_callback.best_model_path, **config["model"],
+                dataset_to_label_to_id=dataset_to_label_to_id
             )
         if torch.cuda.is_available():
             model.cuda()

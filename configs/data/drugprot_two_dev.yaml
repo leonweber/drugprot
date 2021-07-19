@@ -1,7 +1,0 @@
-train:
-  - data/drugprot_two_dev/train.bioc.xml
-dev: data/drugprot_two_dev/dev.bioc.xml
-predict: data/drugprot/dev.bioc.xml
-finetune: null
-limit_examples: null
-checkpoint: null

@@ -2,6 +2,8 @@ import logging
 import os.path
 import warnings
 import tempfile
+
+import hydra
 import pytorch_lightning as pl
 import wandb
 import re
@@ -167,6 +169,19 @@ def log_hyperparameters(
     trainer.logger.log_hyperparams = empty
 
 
+def init(
+        config: DictConfig,
+        model: pl.LightningModule,
+        trainer: pl.Trainer,
+        callbacks: List[pl.Callback],
+        logger: List[pl.loggers.LightningLoggerBase],
+):
+    for lg in logger:
+        if isinstance(lg, WandbLogger):
+            lg.experiment.define_metric("drugprot/train/f1", summary="max")
+            lg.experiment.define_metric("drugprot/val/f1", summary="max")
+
+
 def finish(
     config: DictConfig,
     model: pl.LightningModule,
@@ -218,3 +233,16 @@ def download_file(url: str, cache_dir: Path) -> Path:
     progress.close()
 
     return Path(cache_path)
+
+
+def get_label_dicts(path):
+    label_to_id = {}
+    id_to_label = {}
+    with open(Path(hydra.utils.to_absolute_path(path)).parent / "labels.txt") as f:
+        for i, line in enumerate(f):
+            label = line.strip()
+            if label:
+                label_to_id[label] = i
+                id_to_label[i] = label
+
+    return label_to_id, id_to_label

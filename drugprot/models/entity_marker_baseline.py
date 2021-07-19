@@ -1,6 +1,8 @@
-import os.path
 import warnings
 from collections import defaultdict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 import hydra.utils
 import numpy as np
@@ -10,7 +12,9 @@ import bioc
 import torchmetrics
 import transformers
 from torch import nn
+from torch.utils.data import Dataset
 from tqdm import tqdm
+from transformers.file_utils import ModelOutput
 from transformers.modeling_outputs import SequenceClassifierOutput
 import torch.nn.functional as F
 
@@ -20,37 +24,82 @@ log = utils.get_logger(__name__)
 
 pl.seed_everything(42)
 
-LABEL_TO_ID = {
-    # DrugProt
-    "NONE": 0,
-    "ACTIVATOR": 1,
-    "AGONIST": 2,
-    "AGONIST-ACTIVATOR": 3,
-    "AGONIST-INHIBITOR": 4,
-    "ANTAGONIST": 5,
-    "DIRECT-REGULATOR": 6,
-    "INDIRECT-DOWNREGULATOR": 7,
-    "INDIRECT-UPREGULATOR": 8,
-    "INHIBITOR": 9,
-    "PART-OF": 10,
-    "PRODUCT-OF": 11,
-    "SUBSTRATE": 12,
-    "SUBSTRATE_PRODUCT-OF": 13,
-    # ChemProt extra (not in DrugProt)
-    # "COFACTOR": 14,
-    # "DOWNREGULATOR": 15,
-    # "INDIRECT-REGULATOR": 16,
-    # "MODULATOR": 17,
-    # "MODULATOR-ACTIVATOR": 18,
-    # "MODULATOR-INHIBITOR": 19,
-    # "NOT": 20,
-    # "REGULATOR": 21,
-    # "UNDEFINED": 22,
-    # "UPREGULATOR": 23,
-}
 
-ID_TO_LABEL = {v: k for k, v in LABEL_TO_ID.items()}
+@dataclass
+class BatchMetaInformation:
+    meta: Dict
 
+    def __eq__(self, other):
+        if not isinstance(other, BatchMetaInformation):
+            return False
+
+        return self.meta == other.meta
+
+    def to(self, device): # make compatible with lightning
+        return self
+
+    def __getitem__(self, item):
+        return self.meta[item]
+
+
+
+@dataclass
+class MultitaskClassifierOutput(ModelOutput):
+    loss: Optional[torch.FloatTensor] = None
+    dataset_to_logits: Dict[str, torch.FloatTensor] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
+    attentions: Optional[Tuple[torch.FloatTensor]] = None
+
+
+def sentence_to_examples(sentence, tokenizer, doc_context, label_to_id=None):
+    examples = []
+
+    ann_id_to_ann = {}
+    for ann in sentence.annotations:
+        ann_id_to_ann[ann.id] = ann
+
+    pair_to_relations = defaultdict(set)
+    for rel in sentence.relations:
+        head = rel.get_node("head").refid
+        tail = rel.get_node("tail").refid
+        rel = rel.infons["type"]
+        pair_to_relations[(head, tail)].add(rel)
+
+    for head in sentence.annotations:
+        for tail in sentence.annotations:
+            if doc_context:
+                text = insert_pair_markers(text=doc_context,
+                                           head=head,
+                                           tail=tail,
+                                           sentence_offset=0)
+            else:
+                text = insert_pair_markers(text=sentence.text,
+                                           head=head,
+                                           tail=tail,
+                                           sentence_offset=sentence.offset)
+
+
+            features = tokenizer.encode_plus(text, max_length=512, truncation=True)
+
+            try:
+                assert "HEAD-S" in tokenizer.decode(features["input_ids"])
+                assert "HEAD-E" in tokenizer.decode(features["input_ids"])
+                assert "TAIL-S" in tokenizer.decode(features["input_ids"])
+                assert "TAIL-E" in tokenizer.decode(features["input_ids"])
+            except AssertionError:
+                continue # entity was truncated
+
+
+            if label_to_id:
+                features["labels"] = np.zeros(len(label_to_id))
+                for label in pair_to_relations[(head.id, tail.id)]:
+                    features["labels"][label_to_id[label]] = 1
+
+            examples.append(
+                {"head": head.id, "tail": tail.id, "features": features}
+            )
+
+    return examples
 
 class ATLoss(nn.Module):
     def __init__(self):
@@ -137,66 +186,12 @@ def insert_pair_markers(text, head, tail, sentence_offset):
     return text
 
 
-def sentence_to_examples(sentence, tokenizer, doc_context):
-    examples = []
-
-    ann_id_to_ann = {}
-    for ann in sentence.annotations:
-        ann_id_to_ann[ann.id] = ann
-
-    pair_to_relations = defaultdict(set)
-    for rel in sentence.relations:
-        head = rel.get_node("head").refid
-        tail = rel.get_node("tail").refid
-        assert ann_id_to_ann[head].infons["type"] == "CHEMICAL" and "GENE" in \
-               ann_id_to_ann[tail].infons["type"]
-        rel = rel.infons["type"]
-        pair_to_relations[(head, tail)].add(rel)
-
-    for head in sentence.annotations:
-        for tail in sentence.annotations:
-            if not (head.infons["type"] == "CHEMICAL" and "GENE" in tail.infons["type"]):
-                continue
-
-            if doc_context:
-                text = insert_pair_markers(text=doc_context,
-                                           head=head,
-                                           tail=tail,
-                                           sentence_offset=0)
-            else:
-                text = insert_pair_markers(text=sentence.text,
-                                           head=head,
-                                           tail=tail,
-                                           sentence_offset=sentence.offset)
-
-
-            features = tokenizer.encode_plus(text, max_length=512, truncation=True)
-
-            try:
-                assert "HEAD-S" in tokenizer.decode(features["input_ids"])
-                assert "HEAD-E" in tokenizer.decode(features["input_ids"])
-                assert "TAIL-S" in tokenizer.decode(features["input_ids"])
-                assert "TAIL-E" in tokenizer.decode(features["input_ids"])
-            except AssertionError:
-                continue # entity was truncated
-
-
-            features["labels"] = np.zeros(len(LABEL_TO_ID))
-            for label in pair_to_relations[(head.id, tail.id)]:
-                if label in LABEL_TO_ID:
-                    features["labels"][LABEL_TO_ID[label]] = 1
-
-            examples.append(
-                {"head": head.id, "tail": tail.id, "features": features}
-            )
-
-    return examples
-
-
 class Dataset:
     def __init__(self, path, tokenizer, limit_examples, use_doc_context):
         self.examples = []
         self.tokenizer = tokenizer
+        self.name = Path(hydra.utils.to_absolute_path(path)).parent.name
+        self.label_to_id, self.id_to_label = utils.get_label_dicts(path)
         with open(hydra.utils.to_absolute_path(path)) as f:
             collection = bioc.load(f)
             doc: bioc.BioCDocument
@@ -207,23 +202,30 @@ class Dataset:
                     for sentence in passage.sentences:
                         if use_doc_context:
                             self.examples += sentence_to_examples(sentence, tokenizer,
-                                                                  doc_context=doc.passages[0].text)
+                                                                  doc_context=doc.passages[0].text,
+                                                                  label_to_id=self.label_to_id)
                         else:
                             self.examples += sentence_to_examples(sentence, tokenizer,
-                                                                  doc_context=None)
-
-
+                                                                  doc_context=None,
+                                                                  label_to_id=self.label_to_id)
+                        if limit_examples and len(self.examples) > limit_examples:
+                            break
 
     def __getitem__(self, item):
-        return self.examples[item]["features"]
+        example = self.examples[item]["features"].copy()
+        example["meta"] = {"dataset": self.name}
+
+        return example
 
     def __len__(self):
         return len(self.examples)
 
 
+
 class EntityMarkerBaseline(pl.LightningModule):
     def __init__(self, transformer: str, lr: float, loss: str, tune_thresholds: bool,
-                 use_doc_context: bool):
+                 use_doc_context: bool, dataset_to_label_to_id: Dict[str, Dict[str, int]]
+                 ):
         super().__init__()
 
         loss = loss.lower().strip()
@@ -246,14 +248,32 @@ class EntityMarkerBaseline(pl.LightningModule):
                                   special_tokens=True)
         self.transformer.resize_token_embeddings(len(self.tokenizer))
         self.dropout = nn.Dropout(self.transformer.config.hidden_dropout_prob)
-        self.classifier = nn.Linear(self.transformer.config.hidden_size * 2,
-                                    len(LABEL_TO_ID))
-        self.train_f1 = torchmetrics.F1(num_classes=len(LABEL_TO_ID))
-        self.dev_f1 = torchmetrics.F1(num_classes=len(LABEL_TO_ID))
+
+        self.dataset_to_classifier = nn.ModuleDict()
+        self.dataset_to_train_f1 = {}
+        self.dataset_to_dev_f1 = {}
+        self.dataset_to_label_to_id = dataset_to_label_to_id
+        self.dataset_to_id_to_label = {}
+        for dataset, label_to_id in dataset_to_label_to_id.items():
+            self.dataset_to_classifier[dataset] = nn.Linear(self.transformer.config.hidden_size * 2, len(label_to_id))
+            self.dataset_to_train_f1[dataset] = torchmetrics.F1(num_classes=len(label_to_id))
+            self.dataset_to_dev_f1[dataset] = torchmetrics.F1(num_classes=len(label_to_id))
+
+            self.dataset_to_id_to_label[dataset] = {id_: label for label, id_ in label_to_id.items()}
+
         self.lr = lr
         self.num_training_steps = None
-        self.collate_fn = transformers.DataCollatorWithPadding(self.tokenizer)
-        self.thresholds = nn.Parameter(torch.ones(len(LABEL_TO_ID)) * 0.5)
+
+    def collate_fn(self, data):
+        meta = data[0].pop("meta")
+        for i in data[1:]:
+            m = i.pop("meta")
+            assert m == meta
+        collator = transformers.DataCollatorWithPadding(self.tokenizer)
+        batch = collator(data)
+        batch["meta"] = BatchMetaInformation(meta)
+
+        return batch
 
     def forward(self, features):
         output = self.transformer(input_ids=features["input_ids"],
@@ -268,56 +288,53 @@ class EntityMarkerBaseline(pl.LightningModule):
         head_reps = seq_emb[head_idx]
         tail_reps = seq_emb[tail_idx]
         pairs = torch.cat([head_reps, tail_reps], dim=1)
-        logits = self.classifier(pairs)
+        dataset_to_logits = {}
+
+        for dataset, classifier in self.dataset_to_classifier.items():
+            dataset_to_logits[dataset] = classifier(pairs)
         if "labels" in features:
+            logits = dataset_to_logits[features["meta"]["dataset"]]
             loss = self.loss(logits, features["labels"])
         else:
             loss = None
 
-        return SequenceClassifierOutput(
+        return MultitaskClassifierOutput(
             loss=loss,
-            logits=logits,
+            dataset_to_logits=dataset_to_logits,
             hidden_states=output.hidden_states,
             attentions=output.attentions,
         )
 
     def training_step(self, batch, batch_idx):
+        dataset = batch["meta"]["dataset"]
         output = self.forward(batch)
         self.lr_schedulers().step()
-        self.log("train/loss", output.loss, prog_bar=False)
-        preds = self.logits_to_indicators(output.logits)
-        self.train_f1(preds.float(), batch["labels"].long())
-        self.log("train/f1", self.train_f1, prog_bar=True)
+
+        self.log("total/train/loss", output.loss, prog_bar=True)
+        train_f1 = self.dataset_to_dev_f1[dataset]
+        indicators = self.logits_to_indicators(output.dataset_to_logits[dataset]).to(self.device)
+        train_f1(indicators.float().cpu(), batch["labels"].long().cpu())
+        self.log(f"{dataset}/train/loss", output.loss, prog_bar=False)
+        if dataset == "drugprot":
+            self.log(f"{dataset}/train/f1", train_f1, prog_bar=True)
+        else:
+            self.log(f"{dataset}/train/f1", train_f1, prog_bar=False)
         return output.loss
 
     def validation_step(self, batch, batch_idx):
+        dataset = batch["meta"]["dataset"]
         output = self.forward(batch)
-        self.log("val/loss", output.loss, prog_bar=True)
+        self.log("total/val/loss", output.loss, prog_bar=True)
+        val_f1 = self.dataset_to_dev_f1[dataset]
+        indicators = self.logits_to_indicators(output.dataset_to_logits[dataset]).to(self.device)
+        val_f1(indicators.float().cpu(), batch["labels"].long().cpu())
+        self.log(f"{dataset}/val/loss", output.loss, prog_bar=False)
+        if dataset == "drugprot":
+            self.log(f"{dataset}/val/f1", val_f1, prog_bar=True)
+        else:
+            self.log(f"{dataset}/val/f1", val_f1, prog_bar=False)
 
-        return {"loss": output.loss, "logits": output.logits, "labels": batch["labels"]}
-
-    def validation_epoch_end(self, outputs) -> None:
-        logits = torch.cat([i["logits"] for i in outputs]).to(self.device)
-        labels = torch.cat([i["labels"] for i in outputs]).long().to(self.device)
-        val_f1 = torchmetrics.F1()
-        if self.tune_thresholds:
-            for idx_label in range(len(LABEL_TO_ID)):
-                best_f1 = 0
-                best_threshold = 1.0
-                for idx_threshold in range(1, 100):
-                    threshold = idx_threshold * 0.01
-                    f1 = torchmetrics.F1(threshold=threshold)
-                    label_probs = torch.sigmoid(logits[:, idx_label])
-                    label_labels = labels[:, idx_label]
-                    f1.update(label_probs.cpu(), label_labels.cpu())
-                    if f1.compute() > best_f1:
-                        best_f1 = f1.compute()
-                        best_threshold = threshold
-                self.thresholds[idx_label] = best_threshold
-            log.info(f"Setting new thresholds: {self.thresholds})")
-        indicators = self.logits_to_indicators(logits).to(self.device)
-        val_f1(indicators.float().cpu(), labels.long().cpu())
-        self.log("val/f1", val_f1, prog_bar=True)
+        return output.loss
 
     def configure_optimizers(self):
         assert self.num_training_steps > 0
@@ -334,46 +351,43 @@ class EntityMarkerBaseline(pl.LightningModule):
             thresholds = logits[:, 0].unsqueeze(1)
             return logits > thresholds
         elif isinstance(self.loss, nn.BCEWithLogitsLoss):
-            return torch.sigmoid(logits.to(self.device)) > self.thresholds.to(self.device)
+            return torch.sigmoid(logits.to(self.device)) > 0.5
         else:
             raise ValueError
 
     def predict(self, collection: bioc.BioCCollection) -> None:
         collator = transformers.DataCollatorWithPadding(self.tokenizer)
-        f1 = torchmetrics.F1(num_classes=len(LABEL_TO_ID))
         it = tqdm(collection.documents, desc="Predicting")
         for doc in it:
             for passage in doc.passages:
                 for sent in passage.sentences:
                     if self.use_doc_context:
                         examples = sentence_to_examples(sent, self.tokenizer,
-                                                        doc_context=doc.passages[0].text)
+                                                        doc_context=doc.passages[0].text,
+                                                        label_to_id=None)
                     else:
                         examples = sentence_to_examples(sent, self.tokenizer,
-                                                        doc_context=None)
+                                                        doc_context=None,
+                                                        label_to_id=None)
                     if examples:
                         batch = collator([i["features"] for i in examples])
                         for k, v in batch.items():
                             batch[k] = v.to(self.device)
                         out = self.forward(batch)
-                        preds = self.logits_to_indicators(out.logits)
-                        f1.update(preds.cpu().float(),
-                                  batch['labels'].cpu().long())
-                        if "labels" in batch:
-                            it.set_description(f"F1: {f1.compute():.2f}")
-
-                        for example, preds, logits in zip(examples, preds, out.logits):
-                            head = example["head"]
-                            tail = example["tail"]
-                            for label_idx in torch.where(preds)[0]:
-                                rel = bioc.BioCRelation()
-                                rel.infons["prob"] = logits[label_idx.item()]
-                                rel.infons["type"] = ID_TO_LABEL[label_idx.item()]
-                                rel.add_node(bioc.BioCNode(refid=head,
-                                                           role="head"))
-                                rel.add_node(bioc.BioCNode(refid=tail,
-                                                           role="tail"))
-                                sent.add_relation(rel)
+                        for dataset, dataset_logits in out.dataset_to_logits.items():
+                            preds = self.logits_to_indicators(dataset_logits)
+                            for example, preds, logits in zip(examples, preds, dataset_logits):
+                                head = example["head"]
+                                tail = example["tail"]
+                                for label_idx in torch.where(preds)[0]:
+                                    rel = bioc.BioCRelation()
+                                    rel.infons["prob"] = logits[label_idx.item()]
+                                    rel.infons["type"] = dataset + "/" + self.dataset_to_id_to_label[dataset][label_idx.item()]
+                                    rel.add_node(bioc.BioCNode(refid=head,
+                                                               role="head"))
+                                    rel.add_node(bioc.BioCNode(refid=tail,
+                                                               role="tail"))
+                                    sent.add_relation(rel)
 
         return None
 

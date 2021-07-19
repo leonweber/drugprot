@@ -37,4 +37,4 @@ print_config: True
 ignore_warnings: True
 
 batch_size: 8
-optimized_metric: val/f1
+optimized_metric: drugprot/val/f1
