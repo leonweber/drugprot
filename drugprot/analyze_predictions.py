@@ -29,6 +29,8 @@ if __name__ == '__main__':
         rels = []
         anns = []
 
+        all_bioc_rels = doc.passages[0].relations.copy()
+
         for sentence in doc.passages[0].sentences:
             for ann in sentence.annotations:
                 ann_type = ann.infons['type']
@@ -36,49 +38,51 @@ if __name__ == '__main__':
                 end = start + ann.locations[0].length
                 anns.append(f"{ann.id}\t{ann_type} {start} {end}\t{ann.text}\n")
 
-            true_rels = [i for i in sentence.relations if "prob" not in i.infons]
-            true_rel_set = {(i.get_node("head").refid, i.infons["type"], i.get_node("tail").refid) for i in true_rels}
-            pred_rels = [i for i in sentence.relations if "prob" in i.infons]
-            pred_rel_set = {(i.get_node("head").refid, i.infons["type"], i.get_node("tail").refid) for i in pred_rels}
+            all_bioc_rels.extend(sentence.relations)
 
-            tps = true_rel_set & pred_rel_set
-            fps = pred_rel_set - true_rel_set
-            fns = true_rel_set - pred_rel_set
+        true_rels = [i for i in all_bioc_rels if "prob" not in i.infons]
+        true_rel_set = {(i.get_node("head").refid, i.infons["type"], i.get_node("tail").refid) for i in true_rels}
+        pred_rels = [i for i in all_bioc_rels if "prob" in i.infons]
+        pred_rel_set = {(i.get_node("head").refid, i.infons["type"], i.get_node("tail").refid) for i in pred_rels}
 
-            pair_to_true_relations = defaultdict(set)
-            pair_to_pred_relations = defaultdict(set)
+        tps = true_rel_set & pred_rel_set
+        fps = pred_rel_set - true_rel_set
+        fns = true_rel_set - pred_rel_set
 
-            for rel in sentence.relations:
-                head = rel.get_node("head").refid
-                tail = rel.get_node("tail").refid
+        pair_to_true_relations = defaultdict(set)
+        pair_to_pred_relations = defaultdict(set)
+
+        for rel in all_bioc_rels:
+            head = rel.get_node("head").refid
+            tail = rel.get_node("tail").refid
+            if "prob" in rel.infons:
+                pair_to_pred_relations[(head, tail)].add(rel.infons["type"])
+            else:
+                pair_to_true_relations[(head, tail)].add(rel.infons["type"])
+
+            signature = (head, rel.infons["type"], tail)
+            if signature in tps:
                 if "prob" in rel.infons:
-                    pair_to_pred_relations[(head, tail)].add(rel.infons["type"])
-                else:
-                    pair_to_true_relations[(head, tail)].add(rel.infons["type"])
+                    continue # already written from true relations
+                suffix = ""
+            elif signature in fps:
+                suffix = "_FP"
+            else:
+                suffix = "_FN"
+            rel_type = rel.infons["type"] + suffix
+            rels.append(f"R{len(rels) + 1}\t{rel_type} Arg1:{head} Arg2:{tail}\n")
 
-                signature = (head, rel.infons["type"], tail)
-                if signature in tps:
-                    if "prob" in rel.infons:
-                        continue # already written from true relations
-                    suffix = ""
-                elif signature in fps:
-                    suffix = "_FP"
-                else:
-                    suffix = "_FN"
-                rel_type = rel.infons["type"] + suffix
-                rels.append(f"R{len(rels) + 1}\t{rel_type} Arg1:{head} Arg2:{tail}\n")
+        for pair in set(pair_to_true_relations) | set(pair_to_pred_relations):
+            true = np.zeros(len(LABEL_TO_ID))
+            pred = np.zeros(len(LABEL_TO_ID))
 
-            for pair in set(pair_to_true_relations) | set(pair_to_pred_relations):
-                true = np.zeros(len(LABEL_TO_ID))
-                pred = np.zeros(len(LABEL_TO_ID))
+            for rel in pair_to_true_relations[pair]:
+                true[LABEL_TO_ID[rel]] = 1
+            for rel in pair_to_pred_relations[pair]:
+                pred[LABEL_TO_ID[rel]] = 1
 
-                for rel in pair_to_true_relations[pair]:
-                    true[LABEL_TO_ID[rel]] = 1
-                for rel in pair_to_pred_relations[pair]:
-                    pred[LABEL_TO_ID[rel]] = 1
-
-                y_true.append(true)
-                y_pred.append(pred)
+            y_true.append(true)
+            y_pred.append(pred)
 
         if args.brat_out:
             with (args.brat_out / doc.id).with_suffix(".txt").open("w") as f_txt, \

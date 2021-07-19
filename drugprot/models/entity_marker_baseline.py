@@ -227,18 +227,21 @@ class EntityMarkerBaseline(pl.LightningModule):
         super().__init__()
 
         loss = loss.lower().strip()
-        assert loss in {"atlop", "bce"}
+        assert loss in {"atlop", "bce", "ce"}
         if loss == "atlop":
             self.loss = ATLoss()
-        else:
+        elif loss == "bce":
             self.loss = nn.BCEWithLogitsLoss()
+        elif loss == "ce":
+            self.loss = nn.CrossEntropyLoss()
+        else:
+            raise ValueError
 
         self.tune_thresholds = tune_thresholds
         if self.tune_thresholds and isinstance(self.loss, ATLoss):
             warnings.warn("atlop loss has no fixed thresholds. Setting tune_thresholds to False")
             self.tune_thresholds = False
         self.use_doc_context = use_doc_context
-
 
         self.transformer = transformers.AutoModel.from_pretrained(transformer)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(transformer)
@@ -270,7 +273,10 @@ class EntityMarkerBaseline(pl.LightningModule):
         pairs = torch.cat([head_reps, tail_reps], dim=1)
         logits = self.classifier(pairs)
         if "labels" in features:
-            loss = self.loss(logits, features["labels"])
+            labels = features["labels"]
+            if isinstance(self.loss, nn.CrossEntropyLoss):
+                labels = labels.argmax(dim=1)
+            loss = self.loss(logits, labels)
         else:
             loss = None
 
@@ -335,6 +341,10 @@ class EntityMarkerBaseline(pl.LightningModule):
             return logits > thresholds
         elif isinstance(self.loss, nn.BCEWithLogitsLoss):
             return torch.sigmoid(logits.to(self.device)) > self.thresholds.to(self.device)
+        elif isinstance(self.loss, nn.CrossEntropyLoss):
+            indicators = logits == logits.max(dim=1)[0].unsqueeze(1)
+            indicators[:, 0] = 0
+            return indicators
         else:
             raise ValueError
 
