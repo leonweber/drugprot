@@ -39,6 +39,8 @@ def train(config: DictConfig) -> Optional[float]:
         name = Path(data_path).parent.name
         dataset_to_meta[name] = utils.get_dataset_metadata(data_path)
 
+    # Init Lightning model
+    log.info(f"Instantiating model <{config.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(config.model,
                                                      dataset_to_meta=dataset_to_meta)
     if config["data"]["checkpoint"]:
@@ -55,8 +57,6 @@ def train(config: DictConfig) -> Optional[float]:
         config["data"]["dev"], limit_examples=config["data"]["limit_examples"]
     )
 
-    # Init Lightning model
-    log.info(f"Instantiating model <{config.model._target_}>")
 
 
 
