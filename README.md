@@ -28,3 +28,6 @@ INDIRECT-DOWNREGULATOR       0.79      0.79      0.79       332
            samples avg       0.66      0.66      0.66      3760
 ```
 The brat files for error analysis can then be found in `analysis`
+
+# Run Sweep:
+python -m drugprot.train -m trainer=gpu model=joint model.dist_penalize_factor=0.001,0.0001 hydra/launcher=ray +hydra.launcher.ray.remote.num_gpus=1 trainer.max_epochs=3,5 model.lr=3e-5,5e-5

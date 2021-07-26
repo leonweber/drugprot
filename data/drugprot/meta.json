@@ -1,0 +1,23 @@
+{
+  "labels": [
+    "NONE",
+    "ACTIVATOR",
+    "AGONIST",
+    "AGONIST-ACTIVATOR",
+    "AGONIST-INHIBITOR",
+    "ANTAGONIST",
+    "DIRECT-REGULATOR",
+    "INDIRECT-DOWNREGULATOR",
+    "INDIRECT-UPREGULATOR",
+    "INHIBITOR",
+    "PART-OF",
+    "PRODUCT-OF",
+    "SUBSTRATE",
+    "SUBSTRATE_PRODUCT-OF"
+    ],
+  "pair_types": [
+    ["CHEMICAL", "GENE-Y"],
+    ["CHEMICAL", "GENE-N"],
+    ["CHEMICAL", "GENE"]
+    ]
+}

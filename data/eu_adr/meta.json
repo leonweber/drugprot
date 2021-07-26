@@ -1,0 +1,11 @@
+{
+  "labels": [
+    "NONE",
+    "DRUG-TARGET"
+  ],
+  "pair_types": [
+    ["CHEMICAL", "GENE-Y"],
+    ["CHEMICAL", "GENE-N"],
+    ["CHEMICAL", "GENE"]
+  ]
+}

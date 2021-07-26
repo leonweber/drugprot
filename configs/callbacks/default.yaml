@@ -8,3 +8,8 @@ model_checkpoint:
   dirpath: "checkpoints/"
   filename: "{epoch:02d}"
 
+lr_monitor:
+  _target_: pytorch_lightning.callbacks.LearningRateMonitor
+  logging_interval: step
+
+

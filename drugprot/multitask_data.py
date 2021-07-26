@@ -26,9 +26,10 @@ class MultiTaskDataset(Dataset):
 
 
 class MultiTaskBatchSampler(BatchSampler):
-    def __init__(self, datasets, batch_size, mix_opt, extra_task_ratio):
+    def __init__(self, datasets, batch_size, mix_opt=0, extra_task_ratio=0, drop_last=False):
         self._datasets = datasets
-        self._batch_size = batch_size
+        self.batch_size = batch_size
+        self.drop_last = drop_last
         self._mix_opt = mix_opt
         self._extra_task_ratio = extra_task_ratio
         train_data_list = []

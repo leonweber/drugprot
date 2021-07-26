@@ -1,3 +1,4 @@
+import json
 import logging
 import os.path
 import warnings
@@ -235,14 +236,19 @@ def download_file(url: str, cache_dir: Path) -> Path:
     return Path(cache_path)
 
 
-def get_label_dicts(path):
-    label_to_id = {}
-    id_to_label = {}
-    with open(Path(hydra.utils.to_absolute_path(path)).parent / "labels.txt") as f:
-        for i, line in enumerate(f):
-            label = line.strip()
-            if label:
-                label_to_id[label] = i
-                id_to_label[i] = label
+def get_dataset_metadata(path):
+    processed_meta = {
+        "label_to_id": {},
+        "id_to_label": {},
+        "pair_types": set()
+    }
 
-    return label_to_id, id_to_label
+    with open(Path(hydra.utils.to_absolute_path(path)).parent / "meta.json") as f:
+        meta = json.load(f)
+    for i, label in enumerate(meta["labels"]):
+        processed_meta["label_to_id"][label] = i
+        processed_meta["id_to_label"][i] = label
+
+    processed_meta["pair_types"] = set(tuple(i) for i in meta["pair_types"])
+
+    return processed_meta

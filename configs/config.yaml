@@ -3,7 +3,7 @@
 # specify here default training configuration
 defaults:
   - trainer: cpu.yaml
-  - finetune_trainer: minimal.yaml
+  - finetune_trainer: cpu.yaml
   - model: entity_marker_baseline.yaml
   - data: drugprot.yaml
   - callbacks: default.yaml # set this to null if you don't want to use callbacks

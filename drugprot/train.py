@@ -34,13 +34,13 @@ def train(config: DictConfig) -> Optional[float]:
 
     log.info(config)
 
-    dataset_to_label_to_id = {}
+    dataset_to_meta = {}
     for data_path in config["data"]["train"]:
         name = Path(data_path).parent.name
-        dataset_to_label_to_id[name] = utils.get_label_dicts(data_path)[0]
+        dataset_to_meta[name] = utils.get_dataset_metadata(data_path)
 
     model: LightningModule = hydra.utils.instantiate(config.model,
-                                                     dataset_to_label_to_id=dataset_to_label_to_id)
+                                                     dataset_to_meta=dataset_to_meta)
     if config["data"]["checkpoint"]:
         model = model.load_from_checkpoint(
             hydra.utils.to_absolute_path(config["data"]["checkpoint"]),
@@ -134,23 +134,45 @@ def train(config: DictConfig) -> Optional[float]:
     log.info(
         f"Best {config['optimized_metric']} (before finetuning): {best_score})"
     )
+    # Make sure everything closed properly
+    utils.finish(
+        config=config,
+        model=model,
+        trainer=trainer,
+        callbacks=callbacks,
+        logger=logger,
+    )
 
     if (
         "finetune" in config["data"]
         and config["data"]["finetune"]
         and config["finetune_trainer"]
     ):
-        finetune_data = ConcatDataset(
-            [model.get_dataset(i) for i in config["data"]["finetune"]]
-        )
+        model.lr = model.finetune_lr
+        finetune_datasets = [
+            model.get_dataset(i, limit_examples=config["data"]["limit_examples"])
+            for i in config["data"]["finetune"]
+        ]
+        finetune_dataset = MultiTaskDataset(datasets=train_datasets)
+        finetune_batch_sampler = MultiTaskBatchSampler(datasets=finetune_datasets,
+                                                    batch_size=config["batch_size"],
+                                                    mix_opt=0,
+                                                    extra_task_ratio=0)
+        # Init Lightning loggers
+        logger: List[pl.LightningLoggerBase] = []
+        if "logger" in config:
+            for _, lg_conf in config["logger"].items():
+                if "_target_" in lg_conf:
+                    log.info(f"Instantiating logger <{lg_conf._target_}>")
+                    logger.append(hydra.utils.instantiate(lg_conf))
+
         train_loader = DataLoader(
-            finetune_data,
-            batch_size=config["batch_size"],
-            shuffle=True,
+            dataset=finetune_dataset,
             collate_fn=model.collate_fn,
+            batch_sampler=finetune_batch_sampler
         )
         finetune_trainer: pl.Trainer = hydra.utils.instantiate(
-            config.trainer,
+            config.finetune_trainer,
             callbacks=callbacks,
             logger=logger,
             _convert_="partial",
@@ -181,7 +203,7 @@ def train(config: DictConfig) -> Optional[float]:
         if trainer:
             model = model.load_from_checkpoint(
                 trainer.checkpoint_callback.best_model_path, **config["model"],
-                dataset_to_label_to_id=dataset_to_label_to_id
+                dataset_to_meta=dataset_to_meta
             )
         if torch.cuda.is_available():
             model.cuda()

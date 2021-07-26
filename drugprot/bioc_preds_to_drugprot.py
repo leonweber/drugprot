@@ -20,5 +20,7 @@ if __name__ == "__main__":
                         head = rel.get_node("head").refid
                         tail = rel.get_node("tail").refid
                         rel = rel.infons["type"]
-                        f.write(f"{doc.id}\t{rel}\tArg1:{head}\tArg2:{tail}\n")
+                        if rel.startswith("drugprot/"):
+                            rel = rel.replace("drugprot/", "")
+                            f.write(f"{doc.id}\t{rel}\tArg1:{head}\tArg2:{tail}\n")
 

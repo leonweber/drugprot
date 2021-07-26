@@ -7,13 +7,16 @@ import bioc
 import numpy as np
 from sklearn.metrics import classification_report, multilabel_confusion_matrix
 
-from drugprot.models.entity_marker_baseline import LABEL_TO_ID, ID_TO_LABEL
+from drugprot import utils
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=Path)
+    parser.add_argument("--orig_data_path", type=Path, required=True)
     parser.add_argument("--brat_out", type=Path, default=None)
     args = parser.parse_args()
+
+    meta = utils.get_dataset_metadata(args.orig_data_path)
 
     with args.input.open() as f:
         collection = bioc.load(f)
@@ -69,20 +72,20 @@ if __name__ == '__main__':
                 rels.append(f"R{len(rels) + 1}\t{rel_type} Arg1:{head} Arg2:{tail}\n")
 
             for pair in set(pair_to_true_relations) | set(pair_to_pred_relations):
-                true = np.zeros(len(LABEL_TO_ID))
-                pred = np.zeros(len(LABEL_TO_ID))
+                true = np.zeros(len(meta["label_to_id"]))
+                pred = np.zeros(len(meta["label_to_id"]))
 
                 for rel in pair_to_true_relations[pair]:
-                    true[LABEL_TO_ID[rel]] = 1
+                    true[meta["label_to_id"][rel]] = 1
                 for rel in pair_to_pred_relations[pair]:
-                    pred[LABEL_TO_ID[rel]] = 1
+                    pred[meta["label_to_id"][rel]] = 1
 
                 y_true.append(true)
                 y_pred.append(pred)
 
         if args.brat_out:
-            with (args.brat_out / doc.id).with_suffix(".txt").open("w") as f_txt, \
-                    (args.brat_out / doc.id).with_suffix(".ann").open("w") as f_ann:
+            with open(str(args.brat_out / doc.id) + ".txt", "w") as f_txt, \
+                    open(str(args.brat_out / doc.id) + ".ann", "w") as f_ann:
                 f_txt.write(doc.passages[0].text)
                 f_ann.writelines(anns)
                 f_ann.writelines(rels)
@@ -115,5 +118,5 @@ SUBSTRATE_PRODUCT-OF Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
                     """
                 )
 
-    target_names = sorted(LABEL_TO_ID, key=lambda x: LABEL_TO_ID[x])
+    target_names = sorted(meta["label_to_id"], key=lambda x: meta["label_to_id"][x])
     print(classification_report(y_true=y_true, y_pred=y_pred, target_names=target_names))
