@@ -4,7 +4,7 @@ from pathlib import Path
 
 import bioc
 
-from drugprot.models.entity_marker_baseline import Dataset, insert_pair_markers
+from drugprot.models.entity_marker_baseline import BiocDataset, insert_pair_markers
 
 
 def sentence_to_examples(sentence, doc_id):

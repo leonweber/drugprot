@@ -1,4 +1,5 @@
 {
+  "name": "drugprot",
   "labels": [
     "NONE",
     "ACTIVATOR",
@@ -19,5 +20,6 @@
     ["CHEMICAL", "GENE-Y"],
     ["CHEMICAL", "GENE-N"],
     ["CHEMICAL", "GENE"]
-    ]
+    ],
+  "type": "sentence"
 }

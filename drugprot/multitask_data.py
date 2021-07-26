@@ -9,7 +9,7 @@ class MultiTaskDataset(Dataset):
         self._datasets = datasets
         task_id_2_data_set_dic = {}
         for dataset in datasets:
-            task_id = dataset.name
+            task_id = dataset.meta.name
             assert task_id not in task_id_2_data_set_dic, (
                 "Duplicate task_id %s" % task_id
             )
@@ -26,16 +26,17 @@ class MultiTaskDataset(Dataset):
 
 
 class MultiTaskBatchSampler(BatchSampler):
-    def __init__(self, datasets, batch_size, mix_opt=0, extra_task_ratio=0, drop_last=False):
+    def __init__(self, datasets, dataset_to_batch_size, mix_opt=0, extra_task_ratio=0, drop_last=False):
         self._datasets = datasets
-        self.batch_size = batch_size
+        self.datset_to_batch_size = dataset_to_batch_size
         self.drop_last = drop_last
         self._mix_opt = mix_opt
         self._extra_task_ratio = extra_task_ratio
         train_data_list = []
         for dataset in datasets:
             train_data_list.append(
-                self._get_shuffled_index_batches(len(dataset), batch_size)
+                self._get_shuffled_index_batches(len(dataset),
+                                                 dataset_to_batch_size[dataset.meta.name])
             )
         self._train_data_list = train_data_list
 
@@ -57,7 +58,7 @@ class MultiTaskBatchSampler(BatchSampler):
             self._train_data_list, self._mix_opt, self._extra_task_ratio
         )
         for local_task_idx in all_indices:
-            task_id = self._datasets[local_task_idx].name
+            task_id = self._datasets[local_task_idx].meta.name
             batch = next(all_iters[local_task_idx])
             yield [(task_id, sample_id) for sample_id in batch]
 

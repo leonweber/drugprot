@@ -137,7 +137,6 @@ class JointModel(pl.LightningModule):
     def __init__(self, transformer: str, lr: float, dist_penalize_factor: float):
         super().__init__()
 
-
         self.loss = nn.BCEWithLogitsLoss()
         self.transformer = transformers.AutoModel.from_pretrained(transformer)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(transformer)

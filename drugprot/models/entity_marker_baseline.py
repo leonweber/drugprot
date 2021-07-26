@@ -21,28 +21,11 @@ from drugprot import utils
 
 log = utils.get_logger(__name__)
 
-pl.seed_everything(42)
 
 def overlaps(a, b):
     a = [int(i) for i in a]
     b = [int(i) for i in b]
     return max(0, min(a[1], b[1]) - max(a[0], b[0]))
-
-@dataclass
-class BatchMetaInformation:
-    meta: Dict
-
-    def __eq__(self, other):
-        if not isinstance(other, BatchMetaInformation):
-            return False
-
-        return self.meta == other.meta
-
-    def to(self, device):  # make compatible with lightning
-        return self
-
-    def __getitem__(self, item):
-        return self.meta[item]
 
 
 @dataclass
@@ -252,7 +235,7 @@ def insert_pair_markers(text, head, tail, sentence_offset, mark_with_special_tok
     return text
 
 
-class Dataset:
+class BiocDataset:
     def __init__(
         self,
         path,
@@ -261,10 +244,11 @@ class Dataset:
         use_doc_context,
         mark_with_special_tokens,
         blind_entities,
+        max_length,
     ):
         self.examples = []
         self.tokenizer = tokenizer
-        self.name = Path(hydra.utils.to_absolute_path(path)).parent.name
+        self.max_length = max_length
         self.meta = utils.get_dataset_metadata(path)
         with open(hydra.utils.to_absolute_path(path)) as f:
             collection = bioc.load(f)
@@ -282,10 +266,11 @@ class Dataset:
                             sentence,
                             tokenizer,
                             doc_context=doc_context,
-                            pair_types=self.meta["pair_types"],
-                            label_to_id=self.meta["label_to_id"],
+                            pair_types=self.meta.pair_types,
+                            label_to_id=self.meta.label_to_id,
                             mark_with_special_tokens=mark_with_special_tokens,
-                            blind_entities=blind_entities
+                            blind_entities=blind_entities,
+                            max_length=self.max_length
                         )
 
                         if limit_examples and len(self.examples) > limit_examples:
@@ -293,7 +278,7 @@ class Dataset:
 
     def __getitem__(self, item):
         example = self.examples[item]["features"].copy()
-        example["meta"] = {"dataset": self.name}
+        example["meta"] = self.meta
 
         return example
 
@@ -310,7 +295,9 @@ class EntityMarkerBaseline(pl.LightningModule):
         loss: str,
         tune_thresholds: bool,
         use_doc_context: bool,
-        dataset_to_meta: Dict[str, Dict],
+        dataset_to_meta: Dict[str, utils.DatasetMetaInformation],
+        max_length: int,
+        optimized_metric: str,
         use_cls: bool = False,
         use_starts: bool = False,
         use_ends: bool = False,
@@ -320,6 +307,8 @@ class EntityMarkerBaseline(pl.LightningModule):
         super().__init__()
 
         self.use_cls = use_cls
+        self.max_length = max_length
+        self.optimized_metric = optimized_metric
         self.use_starts = use_starts
         self.use_ends = use_ends
         self.mark_with_special_tokens = mark_with_special_tokens
@@ -370,13 +359,13 @@ class EntityMarkerBaseline(pl.LightningModule):
             seq_rep_size += 2 * self.transformer.config.hidden_size
         for dataset, meta in dataset_to_meta.items():
             self.dataset_to_classifier[dataset] = nn.Linear(
-                seq_rep_size, len(meta["label_to_id"])
+                seq_rep_size, len(meta.label_to_id)
             )
             self.dataset_to_train_f1[dataset] = torchmetrics.F1(
-                num_classes=len(meta["label_to_id"])
+                num_classes=len(meta.label_to_id)
             )
             self.dataset_to_dev_f1[dataset] = torchmetrics.F1(
-                num_classes=len(meta["label_to_id"])
+                num_classes=len(meta.label_to_id)
             )
 
         self.lr = lr
@@ -390,7 +379,7 @@ class EntityMarkerBaseline(pl.LightningModule):
             assert m == meta
         collator = transformers.DataCollatorWithPadding(self.tokenizer)
         batch = collator(data)
-        batch["meta"] = BatchMetaInformation(meta)
+        batch["meta"] = meta
 
         return batch
 
@@ -441,7 +430,7 @@ class EntityMarkerBaseline(pl.LightningModule):
         for dataset, classifier in self.dataset_to_classifier.items():
             dataset_to_logits[dataset] = classifier(seq_reps)
         if "labels" in features:
-            logits = dataset_to_logits[features["meta"]["dataset"]]
+            logits = dataset_to_logits[features["meta"].name]
             loss = self.loss(logits, features["labels"])
         else:
             loss = None
@@ -454,7 +443,7 @@ class EntityMarkerBaseline(pl.LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
-        dataset = batch["meta"]["dataset"]
+        dataset = batch["meta"].name
         output = self.forward(batch)
         self.lr_schedulers().step()
 
@@ -472,7 +461,7 @@ class EntityMarkerBaseline(pl.LightningModule):
         return output.loss
 
     def validation_step(self, batch, batch_idx):
-        dataset = batch["meta"]["dataset"]
+        dataset = batch["meta"].name
         output = self.forward(batch)
         self.log("total/val/loss", output.loss, prog_bar=True)
         val_f1 = self.dataset_to_dev_f1[dataset]
@@ -520,18 +509,22 @@ class EntityMarkerBaseline(pl.LightningModule):
                                 sent,
                                 self.tokenizer,
                                 doc_context=doc.passages[0].text,
-                                pair_types=meta["pair_types"],
+                                pair_types=meta.pair_types,
                                 label_to_id=None,
-                                max_length=512,
+                                max_length=self.max_length,
+                                mark_with_special_tokens=self.mark_with_special_tokens,
+                                blind_entities=self.blind_entities
                             )
                         else:
                             examples = sentence_to_examples(
                                 sent,
                                 self.tokenizer,
                                 doc_context=None,
-                                pair_types=meta["pair_types"],
+                                pair_types=meta.pair_types,
                                 label_to_id=None,
-                                max_length=512,
+                                max_length=self.max_length,
+                                mark_with_special_tokens=self.mark_with_special_tokens,
+                                blind_entities=self.blind_entities
                             )
                         if examples:
                             batch = collator([i["features"] for i in examples])
@@ -562,11 +555,12 @@ class EntityMarkerBaseline(pl.LightningModule):
         return None
 
     def get_dataset(self, path, limit_examples=None):
-        return Dataset(
+        return BiocDataset(
             path,
             self.tokenizer,
             limit_examples=limit_examples,
             use_doc_context=self.use_doc_context,
             mark_with_special_tokens=self.mark_with_special_tokens,
             blind_entities=self.blind_entities,
+            max_length=self.max_length,
         )

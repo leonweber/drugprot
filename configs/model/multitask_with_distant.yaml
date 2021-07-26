@@ -1,15 +1,15 @@
-_target_: drugprot.models.entity_marker_baseline.EntityMarkerBaseline
+_target_: drugprot.models.multitask_with_distant.MultitaskWithDistantModel
 
 transformer: microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract
 lr: 3e-5
 finetune_lr: 1e-5
-loss: bce
-tune_thresholds: false
 use_doc_context: false
 use_cls: true
 use_starts: false
 use_ends: false
-mark_with_special_tokens: false
 blind_entities: false
+sentence_batch_size: 8
+distant_batch_size: 2
+aggregator: lse
 optimized_metric: drugprot/val/f1
 max_length: 128

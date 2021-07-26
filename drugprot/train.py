@@ -101,9 +101,9 @@ def train(config: DictConfig) -> Optional[float]:
 
     train_dataset = MultiTaskDataset(datasets=train_datasets)
     train_batch_sampler = MultiTaskBatchSampler(datasets=train_datasets,
-                                    batch_size=config["batch_size"],
-                                    mix_opt=0,
-                                    extra_task_ratio=0)
+                                                dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
+                                                mix_opt=0,
+                                                extra_task_ratio=0)
 
     train_loader = DataLoader(
         dataset=train_dataset,
@@ -113,7 +113,7 @@ def train(config: DictConfig) -> Optional[float]:
 
     dev_dataset = MultiTaskDataset(datasets=[dev_data])
     dev_batch_sampler = MultiTaskBatchSampler(datasets=[dev_data],
-                                             batch_size=config["batch_size"],
+                                              dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
                                              mix_opt=0,
                                              extra_task_ratio=0)
 
@@ -130,9 +130,9 @@ def train(config: DictConfig) -> Optional[float]:
     trainer.fit(
         model=model, train_dataloader=train_loader, val_dataloaders=dev_loader
     )
-    best_score = trainer.callback_metrics[config["optimized_metric"]]
+    best_score = trainer.callback_metrics[config["model"]["optimized_metric"]]
     log.info(
-        f"Best {config['optimized_metric']} (before finetuning): {best_score})"
+        f"Best {config['model']['optimized_metric']} (before finetuning): {best_score})"
     )
     # Make sure everything closed properly
     utils.finish(
@@ -155,9 +155,9 @@ def train(config: DictConfig) -> Optional[float]:
         ]
         finetune_dataset = MultiTaskDataset(datasets=train_datasets)
         finetune_batch_sampler = MultiTaskBatchSampler(datasets=finetune_datasets,
-                                                    batch_size=config["batch_size"],
-                                                    mix_opt=0,
-                                                    extra_task_ratio=0)
+                                                       dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
+                                                       mix_opt=0,
+                                                       extra_task_ratio=0)
         # Init Lightning loggers
         logger: List[pl.LightningLoggerBase] = []
         if "logger" in config:
@@ -171,6 +171,12 @@ def train(config: DictConfig) -> Optional[float]:
             collate_fn=model.collate_fn,
             batch_sampler=finetune_batch_sampler
         )
+        callbacks: List[pl.Callback] = []
+        if "callbacks" in config:
+            for _, cb_conf in config["callbacks"].items():
+                if "_target_" in cb_conf:
+                    log.info(f"Instantiating callback <{cb_conf._target_}>")
+                    callbacks.append(hydra.utils.instantiate(cb_conf))
         finetune_trainer: pl.Trainer = hydra.utils.instantiate(
             config.finetune_trainer,
             callbacks=callbacks,
@@ -178,10 +184,11 @@ def train(config: DictConfig) -> Optional[float]:
             _convert_="partial",
         )
 
-        finetune_trainer.fit(model=model, train_dataloader=train_loader)
-        best_score = finetune_trainer.callback_metrics[config["optimized_metric"]]
+        finetune_trainer.fit(model=model, train_dataloader=train_loader,
+                             val_dataloaders=dev_loader)
+        best_score = finetune_trainer.callback_metrics[config["model"]["optimized_metric"]]
         log.info(
-            f"Best {config['optimized_metric']} (after finetuning): {best_score})"
+            f"Best {config['model']['optimized_metric']} (after finetuning): {best_score})"
         )
 
         # Make sure everything closed properly
