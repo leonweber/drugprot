@@ -26,6 +26,8 @@ def prepare_data(input_bioc: Path, output_file: Path):
                     type = annotation.infons["type"]
                     if type == "CHEMICAL":
                         if entity[2].startswith("D") or entity[2].startswith("C"):
+                            last_id = entity[2].split("|")[-1]
+                            entity[2] = last_id
                             drugs[entity[0]] = entity
                             num_drugs += 1
                         else:
