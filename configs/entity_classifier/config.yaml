@@ -10,6 +10,8 @@ work_dir: ${hydra:runtime.cwd}
 
 # path to folder with data
 data_dir: ${work_dir}/data/
+
+# Path to the embedding folder + embeddings to use
 #emb_dir: ${data_dir}/embeddings/
 emb_dir: /glusterfs/dfs-gfs-dist/saengema-pub/drugprot/embeddings
 emb_model: DistMult_full_200
@@ -28,18 +30,24 @@ ignore_warnings: True
 
 model:
   _target_: drugprot.models.entity_classifier_baseline.MultiLabelClassificationNetwork
-  hidden_sizes: [ 1000, 500 ]
-  activation: null
-  emb_trainable: false
+  hidden_sizes: [ 512 ]
+  activation: tanh
+  emb_trainable: true
   lr: 0.01
   l1_lambda: 0.0
+  input_dropout: 0.1
+  hidden_dropout: 0.1
+  batch_norm: true
+  amsgrad: true
+  weight_decay: 0.1
 
 data:
   checkpoint: null
   train_file: ${data_dir}/drugprot_entity/train.tsv
   dev_file: ${data_dir}/drugprot_entity/dev.tsv
-  use_unk: true                 # Indicates whether to use DRUG-UNK/GENE-UNK for unknown entities
-  use_none: false               # Indicates whether to use the None class
+  use_unk: false                 # Indicates whether to use DRUG-UNK/GENE-UNK for unknown entities
+  use_none: true               # Indicates whether to use the None class
+  map_to_parent: true
 
 batch_size: 16
 optimized_metric: val/f1

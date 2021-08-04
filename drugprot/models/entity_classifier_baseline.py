@@ -47,7 +47,7 @@ class EntityInteractionDataSet(Dataset):
         return self.examples[idx]
 
     @staticmethod
-    def data_to_examples(data: DataFrame, entity_dict: Dict[str, int],  use_unk: bool, use_none:bool):
+    def data_to_examples(data: DataFrame, entity_dict: Dict[str, int],  use_unk: bool, use_none: bool):
         examples = []
 
         num_missing_heads = 0
@@ -103,7 +103,8 @@ class ClassifierOutput:
 class MultiLabelClassificationNetwork(pl.LightningModule):
 
     def __init__(self, embeddings: Tensor, hidden_sizes: List[int], activation: Optional[str],
-                 emb_trainable: bool, lr: float, l1_lambda: float):
+                 emb_trainable: bool, lr: float, l1_lambda: float, input_dropout: float,
+                 hidden_dropout: float, batch_norm: bool, weight_decay: float, amsgrad: bool):
         super().__init__()
 
         self.embedding = nn.Embedding(
@@ -113,12 +114,24 @@ class MultiLabelClassificationNetwork(pl.LightningModule):
         )
         self.embedding.weight.requires_grad = emb_trainable
 
-        prev_output_size = 2*embeddings.shape[1]
         layers = []
+
+        if input_dropout > 0.0:
+            layers += [nn.Dropout(input_dropout)]
+
+        prev_output_size = 2 * embeddings.shape[1]
         for hidden_size in hidden_sizes:
             layers += [nn.Linear(prev_output_size, hidden_size)]
+
+            if batch_norm:
+                layers += [nn.BatchNorm1d(hidden_size)]
+
             if activation:
-                layers += [ self.get_activation_layer(activation) ]
+                layers += [self.get_activation_layer(activation)]
+
+            if hidden_dropout > 0.0:
+                layers += [nn.Dropout(hidden_dropout)]
+
             prev_output_size = hidden_size
 
         layers += [nn.Linear(prev_output_size, len(LABEL_TO_ID))]
@@ -127,6 +140,8 @@ class MultiLabelClassificationNetwork(pl.LightningModule):
         self.loss = nn.BCEWithLogitsLoss()
         self.learning_rate = lr
         self.l1_lambda = l1_lambda
+        self.weight_decay = weight_decay
+        self.amsgrad = amsgrad
 
         self.train_f1 = torchmetrics.F1(num_classes=len(LABEL_TO_ID))
         self.dev_f1 = torchmetrics.F1(num_classes=len(LABEL_TO_ID))
@@ -197,7 +212,8 @@ class MultiLabelClassificationNetwork(pl.LightningModule):
 
     def configure_optimizers(self):
         assert self.num_training_steps > 0
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate,
+                                     weight_decay=self.weight_decay, amsgrad=self.amsgrad)
         #optimizer = torch.optim.SGD(self.parameters(), lr=self.learning_rate)
         return optimizer
 
