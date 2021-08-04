@@ -13,6 +13,7 @@ from drugprot import utils
 
 log = utils.get_logger(__name__)
 
+
 LABEL_TO_ID = {
     # DrugProt
     "NONE": 0,
@@ -46,7 +47,7 @@ class EntityInteractionDataSet(Dataset):
         return self.examples[idx]
 
     @staticmethod
-    def data_to_examples(data: DataFrame, entity_dict: Dict[str, int], use_unk: bool, use_none:bool):
+    def data_to_examples(data: DataFrame, entity_dict: Dict[str, int],  use_unk: bool, use_none:bool):
         examples = []
 
         num_missing_heads = 0

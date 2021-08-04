@@ -1,13 +1,14 @@
 import argparse
+from collections import defaultdict
+from typing import Dict, Set
+
 import pandas as pd
-import shutil
-import gzip
 
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-from drugprot.utils import download_file
+from drugprot.utils import download_file, gunzip
 
 
 def encode_dataset_for_dgl_ke(ctd_file: Path, train_size: float, output_dir: Path, random_state: float = 42):
@@ -63,9 +64,23 @@ def encode_dataset_for_dgl_ke(ctd_file: Path, train_size: float, output_dir: Pat
                 writer.write("\t".join([str(head_id), str(relation_id), str(tail_id)]) + "\n")
 
 
-def gunzip(file_path: Path, output_path: Path):
-    with gzip.open(file_path,"rb") as f_in, open(output_path, "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out)
+def read_parent_to_childs_mapping() -> Dict[str, Set[str]]:
+    columns = ["ChemicalName", "ChemicalID", "CasRN", "Definition", "ParentIDs",
+               "TreeNumbers", "ParentTreeNumbers","Synonyms"]
+    chem_dict = pd.read_csv(Path("data/ctd/CTD_chemicals.tsv"), sep="\t", comment="#", names=columns)
+
+    parent_to_childs = defaultdict(set)
+    for _, row in chem_dict.iterrows():
+        chem_id = row["ChemicalID"]
+        parent_ids = row["ParentIDs"]
+
+        if type(parent_ids) == float:
+            continue
+
+        for parent_id in parent_ids.split("|"):
+            parent_to_childs[parent_id].add(chem_id)
+
+    return parent_to_childs
 
 
 if __name__ == "__main__":
