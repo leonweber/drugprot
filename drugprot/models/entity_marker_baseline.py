@@ -37,7 +37,7 @@ class MultitaskClassifierOutput(ModelOutput):
 
 
 def sentence_to_examples(
-    sentence, tokenizer, doc_context, pair_types, mark_with_special_tokens, blind_entities, label_to_id=None, max_length=512
+    sentence, tokenizer, doc_context, pair_types, mark_with_special_tokens, blind_entities, label_to_id=None, max_length=512, use_none_class=False
 ):
     examples = []
 
@@ -92,6 +92,9 @@ def sentence_to_examples(
                 features["labels"] = np.zeros(len(label_to_id))
                 for label in pair_to_relations[(head.id, tail.id)]:
                     features["labels"][label_to_id[label]] = 1
+
+                if use_none_class and features["labels"].sum() == 0:
+                    features["labels"][0] = 1
 
             examples.append({"head": head.id, "tail": tail.id, "features": features})
 
@@ -236,20 +239,14 @@ def insert_pair_markers(text, head, tail, sentence_offset, mark_with_special_tok
 
 
 class BiocDataset:
-    def __init__(
-        self,
-        path,
-        tokenizer,
-        limit_examples,
-        use_doc_context,
-        mark_with_special_tokens,
-        blind_entities,
-        max_length,
-    ):
+    def __init__(self, path, tokenizer, limit_examples, use_doc_context,
+                 mark_with_special_tokens, blind_entities, max_length,
+                 use_none_class=False):
         self.examples = []
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.meta = utils.get_dataset_metadata(path)
+        self.use_none_class = use_none_class
         with open(hydra.utils.to_absolute_path(path)) as f:
             collection = bioc.load(f)
             doc: bioc.BioCDocument
@@ -270,7 +267,8 @@ class BiocDataset:
                             label_to_id=self.meta.label_to_id,
                             mark_with_special_tokens=mark_with_special_tokens,
                             blind_entities=blind_entities,
-                            max_length=self.max_length
+                            max_length=self.max_length,
+                            use_none_class=use_none_class
                         )
 
                         if limit_examples and len(self.examples) > limit_examples:
@@ -555,12 +553,8 @@ class EntityMarkerBaseline(pl.LightningModule):
         return None
 
     def get_dataset(self, path, limit_examples=None):
-        return BiocDataset(
-            path,
-            self.tokenizer,
-            limit_examples=limit_examples,
-            use_doc_context=self.use_doc_context,
-            mark_with_special_tokens=self.mark_with_special_tokens,
-            blind_entities=self.blind_entities,
-            max_length=self.max_length,
-        )
+        return BiocDataset(path, self.tokenizer, limit_examples=limit_examples,
+                           use_doc_context=self.use_doc_context,
+                           mark_with_special_tokens=self.mark_with_special_tokens,
+                           blind_entities=self.blind_entities,
+                           max_length=self.max_length)

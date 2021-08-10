@@ -22,7 +22,8 @@ log = utils.get_logger(__name__)
 
 
 class DistantDataset:
-    def __init__(self, path, tokenizer, limit_examples, max_length, max_examples_per_pair=20):
+    def __init__(self, path, tokenizer, limit_examples, max_length,
+                 max_examples_per_pair=20, use_none_class=False):
         self.pair_to_examples = defaultdict(list)
         self.tokenizer = tokenizer
         self.meta = utils.get_dataset_metadata(path)
@@ -47,6 +48,9 @@ class DistantDataset:
                 labels = np.zeros(len(self.meta.label_to_id))
                 for rel in relations:
                     labels[self.meta.label_to_id[rel]] = 1
+
+                if use_none_class and labels.sum() == 0:
+                    labels[0] = 1
 
                 features["labels"] = labels
 
@@ -75,11 +79,13 @@ class Aggregator(abc.ABC, nn.Module):
         self.hidden_size = hidden_size
 
     @abc.abstractmethod
-    def forward(self, seq_rep: torch.FloatTensor, features: Dict) -> torch.FloatTensor:
+    def forward(self, input: Tuple[torch.FloatTensor, Dict]) -> torch.FloatTensor:
         pass
 
-
 class LSEAggregator(Aggregator):
+    def __init__(self, hidden_size: int):
+        super().__init__(hidden_size)
+
     def forward(self, input: Tuple) -> torch.FloatTensor:
         pair_tensors = []
 
@@ -89,10 +95,14 @@ class LSEAggregator(Aggregator):
 
         return torch.stack(pair_tensors, dim=0)
 
+class IdentityAggregator(Aggregator):
+    def __init__(self):
+        super().__init__()
 
-class IdentityAggregator(nn.Module):
     def forward(self, input: Tuple) -> torch.FloatTensor:
         return input[0]
+
+
 
 
 class MultitaskWithDistantModel(pl.LightningModule):
@@ -112,8 +122,19 @@ class MultitaskWithDistantModel(pl.LightningModule):
         use_starts: bool = False,
         use_ends: bool = False,
         blind_entities: bool = False,
-        dropout=0.3):
+        aggregate_after_logits: bool = False,
+        dropout=0.3,
+        learn_logits_mapping=None,
+        use_none_class: bool = False,
+        use_lr_scheduler: bool = True,
+        **kwargs
+    ):
         super().__init__()
+
+        self.use_none_class = use_none_class
+        self.aggregate_after_logits = aggregate_after_logits
+        if not learn_logits_mapping:
+            learn_logits_mapping = []
 
         self.use_cls = use_cls
         self.use_starts = use_starts
@@ -126,10 +147,10 @@ class MultitaskWithDistantModel(pl.LightningModule):
 
         assert use_cls or use_starts or use_ends
 
-
         self.dataset_to_meta = dataset_to_meta
         self.loss = nn.BCEWithLogitsLoss()
 
+        self.use_lr_scheduler = use_lr_scheduler
         self.use_doc_context = use_doc_context
 
         self.transformer = transformers.AutoModel.from_pretrained(transformer)
@@ -143,7 +164,7 @@ class MultitaskWithDistantModel(pl.LightningModule):
         self.transformer_dropout = nn.Dropout(self.transformer.config.hidden_dropout_prob)
         self.non_transformer_dropout = nn.Dropout(dropout)
 
-        self.dataset_to_classifier = nn.ModuleDict()
+        self.dataset_to_out_layer = nn.ModuleDict()
         self.dataset_to_train_f1 = {}
         self.dataset_to_dev_f1 = {}
         seq_rep_size = 0
@@ -161,24 +182,24 @@ class MultitaskWithDistantModel(pl.LightningModule):
             raise NotImplementedError
 
         for dataset, meta in dataset_to_meta.items():
-            out_layer = self.dataset_to_classifier[dataset] = nn.Linear(
+            out_layer = self.dataset_to_out_layer[dataset] = nn.Linear(
                 seq_rep_size, len(meta.label_to_id)
             )
-            if meta.type == "distant":
-                classifier = nn.Sequential(self.aggregator,
-                                           self.non_transformer_dropout,
-                                           out_layer)
-            elif meta.type == "sentence":
-                classifier = nn.Sequential(IdentityAggregator(), out_layer)
-            else:
-                raise ValueError(meta.type)
-            self.dataset_to_classifier[dataset] = classifier
+            self.dataset_to_out_layer[dataset] = out_layer
             self.dataset_to_train_f1[dataset] = torchmetrics.F1(
-                num_classes=len(meta.label_to_id)
+                num_classes=len(meta.label_to_id)-1
             )
             self.dataset_to_dev_f1[dataset] = torchmetrics.F1(
-                num_classes=len(meta.label_to_id)
+                num_classes=len(meta.label_to_id)-1
             )
+
+        self.pair_to_logits_mapper = nn.ModuleDict()
+        for dataset_pair in learn_logits_mapping:
+            src_dataset, tgt_dataset = dataset_pair.split("@")
+            n_labels_src = len(dataset_to_meta[src_dataset].label_to_id)
+            n_labels_tgt = len(dataset_to_meta[tgt_dataset].label_to_id)
+            self.pair_to_logits_mapper[dataset_pair] = nn.Linear(n_labels_src,
+                                                                 n_labels_tgt)
 
         self.lr = lr
         self.finetune_lr = finetune_lr
@@ -226,11 +247,18 @@ class MultitaskWithDistantModel(pl.LightningModule):
         return batch
 
     def forward(self, features):
-        output = self.transformer(
-            input_ids=features["input_ids"],
-            token_type_ids=features["token_type_ids"],
-            attention_mask=features["attention_mask"],
-        )
+        if "token_type_ids" in features:
+            output = self.transformer(
+                input_ids=features["input_ids"],
+                token_type_ids=features["token_type_ids"],
+                attention_mask=features["attention_mask"],
+            )
+        else:
+            output = self.transformer(
+                input_ids=features["input_ids"],
+                attention_mask=features["attention_mask"],
+            )
+
         seq_emb = self.transformer_dropout(output.last_hidden_state)
 
         seq_reps = []
@@ -270,13 +298,28 @@ class MultitaskWithDistantModel(pl.LightningModule):
 
         dataset_to_logits = {}
 
-        for dataset, classifier in self.dataset_to_classifier.items():
-            if features["meta"].type == "sentence" and not isinstance(list(classifier.modules())[1], IdentityAggregator): # MIL for sentence batches makes no sense
-                continue
-            dataset_to_logits[dataset] = classifier((seq_reps, features))
+        for dataset, out_layer in self.dataset_to_out_layer.items():
+            if features["meta"].type == "sentence":
+                dataset_to_logits[dataset] = out_layer(seq_reps)
+            elif features["meta"].type == "distant":
+                if not self.aggregate_after_logits:
+                    aggregated_reps = self.aggregator((seq_reps, features))
+                    dataset_to_logits[dataset] = out_layer(aggregated_reps)
+                else:
+                    logits = out_layer(seq_reps)
+                    aggregated_logits = self.aggregator((logits, features))
+                    dataset_to_logits[dataset] = aggregated_logits
+
         if "labels" in features:
             logits = dataset_to_logits[features["meta"].name]
             loss = self.loss(logits, features["labels"])
+
+            for dataset_pair, logits_mapper in self.pair_to_logits_mapper.items():
+                src_dataset, tgt_dataset = dataset_pair.split("@")
+                if tgt_dataset == features["meta"].name:
+                    mapped_logits = logits_mapper(dataset_to_logits[src_dataset])
+                    loss += self.loss(mapped_logits, features["labels"])
+
         else:
             loss = None
 
@@ -290,20 +333,27 @@ class MultitaskWithDistantModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         dataset = batch["meta"].name
         output = self.forward(batch)
-        self.lr_schedulers().step()
+
+        if self.lr_schedulers():
+            self.lr_schedulers().step()
 
         self.log("total/train/loss", output.loss, prog_bar=True)
-        train_f1 = self.dataset_to_dev_f1[dataset]
+        train_f1 = self.dataset_to_train_f1[dataset]
         indicators = self.logits_to_indicators(output.dataset_to_logits[dataset]).to(
             self.device
         )
-        train_f1(indicators.float().cpu(), batch["labels"].long().cpu())
+        train_f1(indicators.float().cpu()[:, 1:], batch["labels"].long().cpu()[:, 1:])
         self.log(f"{dataset}/train/loss", output.loss, prog_bar=False)
         if dataset == "drugprot":
             self.log(f"{dataset}/train/f1", train_f1, prog_bar=True)
         else:
             self.log(f"{dataset}/train/f1", train_f1, prog_bar=False)
         return output.loss
+
+    def training_epoch_end(self, outputs) -> None:
+        for dataset, train_f1 in self.dataset_to_train_f1.items():
+            self.log(f"{dataset}/train/f1_epoch", train_f1, prog_bar=False)
+
 
     def validation_step(self, batch, batch_idx):
         dataset = batch.meta.name
@@ -313,7 +363,7 @@ class MultitaskWithDistantModel(pl.LightningModule):
         indicators = self.logits_to_indicators(output.dataset_to_logits[dataset]).to(
             self.device
         )
-        val_f1(indicators.float().cpu(), batch["labels"].long().cpu())
+        val_f1(indicators.float().cpu()[:, 1:], batch["labels"].long().cpu()[:, 1:])
         self.log(f"{dataset}/val/loss", output.loss, prog_bar=False)
         if dataset == "drugprot":
             self.log(f"{dataset}/val/f1", val_f1, prog_bar=True)
@@ -325,13 +375,18 @@ class MultitaskWithDistantModel(pl.LightningModule):
     def configure_optimizers(self):
         assert self.num_training_steps > 0
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        schedule = transformers.get_linear_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=0.1 * self.num_training_steps,
-            num_training_steps=self.num_training_steps,
-        )
 
-        return [optimizer], [schedule]
+        if self.use_lr_scheduler:
+            schedule = transformers.get_linear_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=0.1 * self.num_training_steps,
+                num_training_steps=self.num_training_steps,
+            )
+
+            return [optimizer], [schedule]
+        else:
+            return [optimizer]
+
 
     def logits_to_indicators(self, logits: torch.FloatTensor) -> torch.LongTensor:
         return torch.sigmoid(logits.to(self.device)) > 0.5
@@ -372,6 +427,7 @@ class MultitaskWithDistantModel(pl.LightningModule):
                                 batch[k] = v.to(self.device)
                             out = self.forward(batch)
                             dataset_logits = out.dataset_to_logits[dataset]
+
                             preds = self.logits_to_indicators(dataset_logits)
                             for example, preds, logits in zip(
                                 examples, preds, dataset_logits
@@ -380,7 +436,7 @@ class MultitaskWithDistantModel(pl.LightningModule):
                                 tail = example["tail"]
                                 for label_idx in torch.where(preds)[0]:
                                     rel = bioc.BioCRelation()
-                                    rel.infons["prob"] = logits[label_idx.item()]
+                                    rel.infons["prob"] = logits[label_idx].item()
                                     rel.infons["type"] = (
                                         dataset
                                         + "/"
@@ -402,6 +458,7 @@ class MultitaskWithDistantModel(pl.LightningModule):
                 self.tokenizer,
                 max_length=self.max_length,
                 limit_examples=limit_examples,
+                use_none_class=self.use_none_class
             )
         elif meta.type == "sentence":
             return BiocDataset(
@@ -411,7 +468,8 @@ class MultitaskWithDistantModel(pl.LightningModule):
                 use_doc_context=self.use_doc_context,
                 mark_with_special_tokens=True,
                 blind_entities=self.blind_entities,
-                max_length=self.max_length
+                max_length=self.max_length,
+                use_none_class=self.use_none_class
             )
         else:
             raise ValueError(meta.type)

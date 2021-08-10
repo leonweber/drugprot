@@ -13,3 +13,7 @@ distant_batch_size: 2
 aggregator: lse
 optimized_metric: drugprot/val/f1
 max_length: 128
+learn_logits_mapping: []
+aggregate_after_logits: false
+use_none_class: true
+use_lr_scheduler: true

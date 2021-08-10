@@ -22,5 +22,6 @@ if __name__ == "__main__":
                         rel = rel.infons["type"]
                         if rel.startswith("drugprot/"):
                             rel = rel.replace("drugprot/", "")
-                            f.write(f"{doc.id}\t{rel}\tArg1:{head}\tArg2:{tail}\n")
+                            if rel.lower() != "none":
+                                f.write(f"{doc.id}\t{rel}\tArg1:{head}\tArg2:{tail}\n")
 

@@ -1,0 +1,7 @@
+_target_: drugprot.models.explainable_bert.ExplainableBert
+
+transformer: microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract
+lr: 3e-5
+finetune_lr: 1e-5
+optimized_metric: val/f1
+max_length: 128

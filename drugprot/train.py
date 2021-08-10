@@ -29,6 +29,8 @@ def train(config: DictConfig) -> Optional[float]:
     """
 
     # Set seed for random number generators in pytorch, numpy and python.random
+    best_score = 0.0
+
     if "seed" in config:
         pl.seed_everything(config.seed, workers=True)
 
@@ -43,110 +45,111 @@ def train(config: DictConfig) -> Optional[float]:
     log.info(f"Instantiating model <{config.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(config.model,
                                                      dataset_to_meta=dataset_to_meta)
-    if config["data"]["checkpoint"]:
+    if config["checkpoint"]:
+        checkpoint = config["checkpoint"]
         model = model.load_from_checkpoint(
-            hydra.utils.to_absolute_path(config["data"]["checkpoint"]),
+            hydra.utils.to_absolute_path(checkpoint),
+            dataset_to_meta=dataset_to_meta,
+            strict=False,
             **config["model"]
         )
 
-    train_datasets = [
+    if config["trainer"]["_target_"] != "None":
+        train_datasets = [
             model.get_dataset(i, limit_examples=config["data"]["limit_examples"])
             for i in config["data"]["train"]
         ]
-    dev_data = model.get_dataset(
-        config["data"]["dev"], limit_examples=config["data"]["limit_examples"]
-    )
+        dev_data = model.get_dataset(
+            config["data"]["dev"], limit_examples=config["data"]["limit_examples"]
+        )
 
+        # Init Lightning callbacks
+        callbacks: List[pl.Callback] = []
+        if "callbacks" in config:
+            for _, cb_conf in config["callbacks"].items():
+                if "_target_" in cb_conf:
+                    log.info(f"Instantiating callback <{cb_conf._target_}>")
+                    callbacks.append(hydra.utils.instantiate(cb_conf))
 
+        # Init Lightning loggers
+        logger: List[pl.LightningLoggerBase] = []
+        if "logger" in config:
+            for _, lg_conf in config["logger"].items():
+                if "_target_" in lg_conf:
+                    log.info(f"Instantiating logger <{lg_conf._target_}>")
+                    logger.append(hydra.utils.instantiate(lg_conf))
 
+        # Init Lightning trainer
+        log.info(f"Instantiating trainer <{config.trainer._target_}>")
+        trainer: pl.Trainer = hydra.utils.instantiate(
+            config.trainer,
+            callbacks=callbacks,
+            logger=logger,
+            _convert_="partial",
+        )
 
-    # Init Lightning callbacks
-    callbacks: List[pl.Callback] = []
-    if "callbacks" in config:
-        for _, cb_conf in config["callbacks"].items():
-            if "_target_" in cb_conf:
-                log.info(f"Instantiating callback <{cb_conf._target_}>")
-                callbacks.append(hydra.utils.instantiate(cb_conf))
+        log.info("Initializing")
+        utils.init(
+            config=config,
+            model=model,
+            trainer=trainer,
+            callbacks=callbacks,
+            logger=logger,
+        )
 
-    # Init Lightning loggers
-    logger: List[pl.LightningLoggerBase] = []
-    if "logger" in config:
-        for _, lg_conf in config["logger"].items():
-            if "_target_" in lg_conf:
-                log.info(f"Instantiating logger <{lg_conf._target_}>")
-                logger.append(hydra.utils.instantiate(lg_conf))
+        utils.log_hyperparameters(
+            config=config,
+            model=model,
+            trainer=trainer,
+        )
 
-    # Init Lightning trainer
-    log.info(f"Instantiating trainer <{config.trainer._target_}>")
-    trainer: pl.Trainer = hydra.utils.instantiate(
-        config.trainer,
-        callbacks=callbacks,
-        logger=logger,
-        _convert_="partial",
-    )
+        train_dataset = MultiTaskDataset(datasets=train_datasets)
 
-    log.info("Initializing")
-    utils.init(
-        config=config,
-        model=model,
-        trainer=trainer,
-        callbacks=callbacks,
-        logger=logger,
-    )
-    utils.log_hyperparameters(
-        config=config,
-        model=model,
-        trainer=trainer,
-    )
+        train_batch_sampler = MultiTaskBatchSampler(datasets=train_datasets,
+                                                    dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
+                                                    mix_opt=0,
+                                                    extra_task_ratio=0)
 
-    train_dataset = MultiTaskDataset(datasets=train_datasets)
-    train_batch_sampler = MultiTaskBatchSampler(datasets=train_datasets,
-                                                dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
-                                                mix_opt=0,
-                                                extra_task_ratio=0)
+        train_loader = DataLoader(
+            dataset=train_dataset,
+            collate_fn=model.collate_fn,
+            batch_sampler=train_batch_sampler
+        )
 
-    train_loader = DataLoader(
-        dataset=train_dataset,
-        collate_fn=model.collate_fn,
-        batch_sampler=train_batch_sampler
-    )
+        dev_dataset = MultiTaskDataset(datasets=[dev_data])
+        dev_batch_sampler = MultiTaskBatchSampler(datasets=[dev_data],
+                                                  dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
+                                                 mix_opt=0,
+                                                 extra_task_ratio=0)
 
-    dev_dataset = MultiTaskDataset(datasets=[dev_data])
-    dev_batch_sampler = MultiTaskBatchSampler(datasets=[dev_data],
-                                              dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
-                                             mix_opt=0,
-                                             extra_task_ratio=0)
+        dev_loader = DataLoader(
+            dataset=dev_dataset,
+            collate_fn=model.collate_fn,
+            batch_sampler=dev_batch_sampler
+        )
 
-    dev_loader = DataLoader(
-        dataset=dev_dataset,
-        collate_fn=model.collate_fn,
-        batch_sampler=dev_batch_sampler
-    )
+        model.num_training_steps = len(train_loader) * trainer.max_epochs
 
-    model.num_training_steps = len(train_loader) * trainer.max_epochs
-
-    # Train the model
-    log.info("Starting training!")
-    trainer.fit(
-        model=model, train_dataloader=train_loader, val_dataloaders=dev_loader
-    )
-    best_score = trainer.callback_metrics[config["model"]["optimized_metric"]]
-    log.info(
-        f"Best {config['model']['optimized_metric']} (before finetuning): {best_score})"
-    )
-    # Make sure everything closed properly
-    utils.finish(
-        config=config,
-        model=model,
-        trainer=trainer,
-        callbacks=callbacks,
-        logger=logger,
-    )
+        # Train the model
+        log.info("Starting training!")
+        trainer.fit(
+            model=model, train_dataloader=train_loader, val_dataloaders=dev_loader
+        )
+        best_score = trainer.callback_metrics[config["model"]["optimized_metric"]]
+        log.info(
+            f"Best {config['model']['optimized_metric']} (before finetuning): {best_score})"
+        )
+        # Make sure everything closed properly
+        utils.finish(
+            config=config,
+            model=model,
+            trainer=trainer,
+            callbacks=callbacks,
+            logger=logger,
+        )
 
     if (
-        "finetune" in config["data"]
-        and config["data"]["finetune"]
-        and config["finetune_trainer"]
+        config["finetune_trainer"]["_target_"] != "None"
     ):
         model.lr = model.finetune_lr
         finetune_datasets = [
@@ -207,9 +210,14 @@ def train(config: DictConfig) -> Optional[float]:
         )
 
     if "predict" in config["data"] and config["data"]["predict"]:
-        if trainer:
+        try:
             model = model.load_from_checkpoint(
                 trainer.checkpoint_callback.best_model_path, **config["model"],
+                dataset_to_meta=dataset_to_meta
+            )
+        except NameError:
+            model = model.load_from_checkpoint(
+                hydra.utils.to_absolute_path(config.data.checkpoint), **config["model"],
                 dataset_to_meta=dataset_to_meta
             )
         if torch.cuda.is_available():
@@ -223,6 +231,8 @@ def train(config: DictConfig) -> Optional[float]:
             with open("predictions.bioc.xml", "w") as f:
                 bioc.dump(collection, f)
             log.info(f"Wrote predictions to {os.path.abspath(os.getcwd())}/predictions.bioc.xml")
+
+    return best_score
 
 
 if __name__ == "__main__":

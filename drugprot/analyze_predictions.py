@@ -1,22 +1,30 @@
 import argparse
-from collections import defaultdict
+import json
+import random
+import warnings
+from collections import defaultdict, Counter
 from pathlib import Path
 from typing import Optional
 
 import bioc
 import numpy as np
-from sklearn.metrics import classification_report, multilabel_confusion_matrix
 
-from drugprot import utils
+
+
+def get_explanation_tokens(explanation, tokens, topk):
+    explanation_tokens = []
+    explanation = np.array(explanation)
+    for i in np.argsort(explanation)[-topk:]:
+        explanation_tokens.append(tokens[i])
+
+    return explanation_tokens
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=Path)
-    parser.add_argument("--orig_data_path", type=Path, required=True)
     parser.add_argument("--brat_out", type=Path, default=None)
     args = parser.parse_args()
-
-    meta = utils.get_dataset_metadata(args.orig_data_path)
 
     with args.input.open() as f:
         collection = bioc.load(f)
@@ -27,6 +35,19 @@ if __name__ == '__main__':
 
     y_true = []
     y_pred = []
+
+    correct_explanations = defaultdict(list)
+    confusion_explanations = defaultdict(list)
+    confusion_count = defaultdict(int)
+    confusion_texts = defaultdict(list)
+
+    n_total = 0
+    n_skipped = 0
+
+    n_tps = 0
+    n_fps = 0
+    n_fns = 0
+
 
     for doc in collection.documents:
         rels = []
@@ -39,14 +60,18 @@ if __name__ == '__main__':
                 end = start + ann.locations[0].length
                 anns.append(f"{ann.id}\t{ann_type} {start} {end}\t{ann.text}\n")
 
-            true_rels = [i for i in sentence.relations if "prob" not in i.infons]
+            true_rels = [i for i in sentence.relations if "prob" not in i.infons and i.infons["type"].lower() != "none"]
             true_rel_set = {(i.get_node("head").refid, i.infons["type"], i.get_node("tail").refid) for i in true_rels}
             pred_rels = [i for i in sentence.relations if "prob" in i.infons]
-            pred_rel_set = {(i.get_node("head").refid, i.infons["type"], i.get_node("tail").refid) for i in pred_rels}
+            pred_rel_set = {(i.get_node("head").refid, i.infons["type"], i.get_node("tail").refid) for i in pred_rels if i.infons["type"].lower() != "none"}
 
             tps = true_rel_set & pred_rel_set
             fps = pred_rel_set - true_rel_set
             fns = true_rel_set - pred_rel_set
+
+            n_tps += len(tps)
+            n_fps += len(fps)
+            n_fns += len(fns)
 
             pair_to_true_relations = defaultdict(set)
             pair_to_pred_relations = defaultdict(set)
@@ -55,33 +80,78 @@ if __name__ == '__main__':
                 head = rel.get_node("head").refid
                 tail = rel.get_node("tail").refid
                 if "prob" in rel.infons:
-                    pair_to_pred_relations[(head, tail)].add(rel.infons["type"])
+                    pair_to_pred_relations[(head, tail)].add(rel)
                 else:
-                    pair_to_true_relations[(head, tail)].add(rel.infons["type"])
+                    pair_to_true_relations[(head, tail)].add(rel)
 
-                signature = (head, rel.infons["type"], tail)
+            for rel in sentence.relations:
+                n_total += 1
+                head = rel.get_node("head").refid
+                tail = rel.get_node("tail").refid
+                rel_type = rel.infons["type"]
+                if rel_type == "NONE":
+                    continue
+                signature = (head, rel_type, tail)
                 if signature in tps:
                     if "prob" in rel.infons:
+                        if "explanation" in rel.infons:
+                            try:
+                                explanation_tokens = get_explanation_tokens(explanation=json.loads(rel.infons["explanation"]),
+                                                                            tokens=json.loads(rel.infons["tokens"].replace("'", '"')),
+                                                                            topk=5)
+                                correct_explanations[rel_type].extend(explanation_tokens)
+                            except json.JSONDecodeError:
+                                n_skipped += 1
+
+
                         continue # already written from true relations
                     suffix = ""
                 elif signature in fps:
                     suffix = "_FP"
+                    confusion_rels = pair_to_true_relations[(head, tail)]
+                    if not confusion_rels:
+                        confusion_rels = {"NONE"}
+                    if "explanation" in rel.infons:
+                        for confusion_rel in confusion_rels:
+                            try:
+                                confusion_type = confusion_rel.infons["type"]
+                            except AttributeError:
+                                confusion_type = confusion_rel
+                            try:
+                                explanation_tokens = get_explanation_tokens(explanation=json.loads(rel.infons["explanation"]),
+                                                                            tokens=json.loads(rel.infons["tokens"].replace("'", '"')),
+                                                                            topk=5)
+                                confusion_explanations[(rel_type, confusion_type)].extend(explanation_tokens)
+                                confusion_texts[(rel_type, confusion_type)].append(rel.infons["tokens"])
+                                confusion_count[(rel_type, confusion_type)] += 1
+                            except json.JSONDecodeError:
+                                n_skipped += 1
+
                 else:
                     suffix = "_FN"
+                    confusion_rels = pair_to_pred_relations[(head, tail)]
+                    for confusion_rel in confusion_rels:
+                        if confusion_rel.infons["type"] != "NONE":
+                            continue
+                        if "explanation" in confusion_rel.infons:
+                            try:
+                                explanation_tokens = get_explanation_tokens(explanation=json.loads(confusion_rel.infons["explanation"]),
+                                                                            tokens=json.loads(confusion_rel.infons["tokens"].replace("'", '"')),
+                                                                            topk=5)
+                            except json.JSONDecodeError:
+                                n_skipped += 1
+                                explanation_tokens = None
+                        else:
+                            explanation_tokens = None
+
+                        assert confusion_rel.infons["type"] == "NONE"
+                        if explanation_tokens:
+                            confusion_explanations[(confusion_rel.infons["type"], rel_type)].extend(explanation_tokens)
+                        confusion_count[(confusion_rel.infons["type"], rel_type)] += 1
+                        # confusion_texts[(confusion_rel.infons["type"], rel_type)].append(rel.infons["tokens"])
+
                 rel_type = rel.infons["type"] + suffix
                 rels.append(f"R{len(rels) + 1}\t{rel_type} Arg1:{head} Arg2:{tail}\n")
-
-            for pair in set(pair_to_true_relations) | set(pair_to_pred_relations):
-                true = np.zeros(len(meta["label_to_id"]))
-                pred = np.zeros(len(meta["label_to_id"]))
-
-                for rel in pair_to_true_relations[pair]:
-                    true[meta["label_to_id"][rel]] = 1
-                for rel in pair_to_pred_relations[pair]:
-                    pred[meta["label_to_id"][rel]] = 1
-
-                y_true.append(true)
-                y_pred.append(pred)
 
         if args.brat_out:
             with open(str(args.brat_out / doc.id) + ".txt", "w") as f_txt, \
@@ -117,6 +187,21 @@ SUBSTRATE_PRODUCT-OF Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
 [attributes]
                     """
                 )
+    warnings.warn(f"Skipped {n_skipped}/{n_total} explanations due to invalid tokens")
+    print(f"F1: {n_tps/(n_tps + 0.5 * (n_fps + n_fns))}")
 
-    target_names = sorted(meta["label_to_id"], key=lambda x: meta["label_to_id"][x])
-    print(classification_report(y_true=y_true, y_pred=y_pred, target_names=target_names))
+    for rel_type, explanations in correct_explanations.items():
+        print("=============")
+        print(rel_type)
+        print("=============")
+        print(Counter(explanations).most_common(10))
+        print()
+        print()
+
+    for confusion_pair, n in sorted(confusion_count.items(), key=lambda x: x[1])[::-1]:
+        print("=============")
+        print(confusion_pair, n)
+        print("=============")
+        print(Counter(confusion_explanations[confusion_pair]).most_common(10))
+        print()
+        print()
