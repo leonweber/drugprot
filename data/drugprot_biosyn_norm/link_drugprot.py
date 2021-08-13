@@ -90,7 +90,7 @@ def main(args):
         for p in doc.passages:
             for sent in p.sentences:
                 annotations = copy.deepcopy(sent.annotations)
-                mentions = [a.text if a.infons.get('type').replace('-Y','').lower() == args.entity else None for a in annotations]
+                mentions = [a.text if a.infons.get('type').replace('-Y','').replace('-N','').lower() == args.entity else None for a in annotations]
                 to_be_linked_idxs = [idx for idx,m in enumerate(mentions) if m is not None]
                 mentions = [tpp.run(m) for m in mentions if m is not None]
                 
