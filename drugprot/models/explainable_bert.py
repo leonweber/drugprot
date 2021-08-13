@@ -135,10 +135,10 @@ class ExplainableBert(pl.LightningModule):
                         self.tokenizer,
                         doc_context=None,
                         pair_types=self.meta.pair_types,
-                        label_to_id=None,
+                        label_to_id=self.meta.label_to_id,
                         max_length=self.max_length,
                         mark_with_special_tokens=True,
-                        blind_entities=False
+                        blind_entities=False,
                     )
                     if examples:
                         batch = collator([i["features"] for i in examples])

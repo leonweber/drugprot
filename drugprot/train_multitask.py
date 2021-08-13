@@ -103,21 +103,29 @@ def train(config: DictConfig) -> Optional[float]:
             trainer=trainer,
         )
 
-        train_dataset = ConcatDataset(train_datasets)
+        train_dataset = MultiTaskDataset(datasets=train_datasets)
+
+        train_batch_sampler = MultiTaskBatchSampler(datasets=train_datasets,
+                                                    dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
+                                                    mix_opt=0,
+                                                    extra_task_ratio=0)
 
         train_loader = DataLoader(
             dataset=train_dataset,
             collate_fn=model.collate_fn,
-            batch_size=config["batch_size"],
-            shuffle=True
+            batch_sampler=train_batch_sampler
         )
 
+        dev_dataset = MultiTaskDataset(datasets=[dev_data])
+        dev_batch_sampler = MultiTaskBatchSampler(datasets=[dev_data],
+                                                  dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
+                                                 mix_opt=0,
+                                                 extra_task_ratio=0)
 
         dev_loader = DataLoader(
-            dataset=dev_data,
+            dataset=dev_dataset,
             collate_fn=model.collate_fn,
-            batch_size=config["batch_size"],
-            shuffle=False
+            batch_sampler=dev_batch_sampler
         )
 
         model.num_training_steps = len(train_loader) * trainer.max_epochs
@@ -148,7 +156,11 @@ def train(config: DictConfig) -> Optional[float]:
             model.get_dataset(i, limit_examples=config["data"]["limit_examples"])
             for i in config["data"]["finetune"]
         ]
-        finetune_dataset = ConcatDataset(finetune_datasets)
+        finetune_dataset = MultiTaskDataset(datasets=train_datasets)
+        finetune_batch_sampler = MultiTaskBatchSampler(datasets=finetune_datasets,
+                                                       dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
+                                                       mix_opt=0,
+                                                       extra_task_ratio=0)
         # Init Lightning loggers
         logger: List[pl.LightningLoggerBase] = []
         if "logger" in config:
@@ -160,8 +172,7 @@ def train(config: DictConfig) -> Optional[float]:
         train_loader = DataLoader(
             dataset=finetune_dataset,
             collate_fn=model.collate_fn,
-            batch_size=config.batch_size,
-            shuffle=True
+            batch_sampler=finetune_batch_sampler
         )
         callbacks: List[pl.Callback] = []
         if "callbacks" in config:
@@ -206,7 +217,7 @@ def train(config: DictConfig) -> Optional[float]:
             )
         except NameError:
             model = model.load_from_checkpoint(
-                hydra.utils.to_absolute_path(config.checkpoint), **config["model"],
+                hydra.utils.to_absolute_path(config.data.checkpoint), **config["model"],
                 dataset_to_meta=dataset_to_meta
             )
         if torch.cuda.is_available():

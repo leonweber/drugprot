@@ -1,5 +1,6 @@
 train:
   - data/drugprot_biosyn_norm/train.bioc.xml
+  - data/ctd_relabeled/small_relabeled_local_confident.tsv
 dev: data/drugprot_biosyn_norm/dev.bioc.xml
 predict: data/drugprot_biosyn_norm/dev.bioc.xml
 finetune: null

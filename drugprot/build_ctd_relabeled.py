@@ -1,56 +1,16 @@
-import argparse
 import json
-import random
-import warnings
 from collections import defaultdict, Counter
-from pathlib import Path
-from typing import Optional
 
 import bioc
-import numpy as np
+import pandas as pd
+
+from drugprot.analyze_predictions import get_explanation_tokens
 
 
-
-def get_explanation_tokens(explanation, tokens, topk):
-    explanation_tokens = []
-    explanation = np.array(explanation)
-    for i in np.argsort(explanation)[-topk:]:
-        explanation_tokens.append(tokens[i])
-
-    return explanation_tokens
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("input", type=Path)
-    parser.add_argument("--brat_out", type=Path, default=None)
-    args = parser.parse_args()
-
-    with args.input.open() as f:
-        collection = bioc.load(f)
-
-    if args.brat_out:
-        args.brat_out: Optional[Path]
-        args.brat_out.mkdir(exist_ok=True)
-
-    y_true = []
-    y_pred = []
-
+def get_base_explanations(documents):
+    confusion_explanations = defaultdict(list)
     correct_explanations = defaultdict(list)
-    confusion_explanations_false_class = defaultdict(list)
-    confusion_explanations_true_class = defaultdict(list)
-    confusion_count = defaultdict(int)
-    confusion_texts = defaultdict(list)
-
-    n_total = 0
-    n_skipped = 0
-
-    n_tps = 0
-    n_fps = 0
-    n_fns = 0
-
-
-    for doc in collection.documents:
+    for doc in documents:
         rels = []
         anns = []
 
@@ -70,10 +30,6 @@ if __name__ == '__main__':
             fps = pred_rel_set - true_rel_set
             fns = true_rel_set - pred_rel_set
 
-            n_tps += len(tps)
-            n_fps += len(fps)
-            n_fns += len(fns)
-
             pair_to_true_relations = defaultdict(set)
             pair_to_pred_relations = defaultdict(set)
 
@@ -86,7 +42,6 @@ if __name__ == '__main__':
                     pair_to_true_relations[(head, tail)].add(rel)
 
             for rel in sentence.relations:
-                n_total += 1
                 head = rel.get_node("head").refid
                 tail = rel.get_node("tail").refid
                 rel_type = rel.infons["type"]
@@ -99,16 +54,14 @@ if __name__ == '__main__':
                             try:
                                 explanation_tokens = get_explanation_tokens(explanation=json.loads(rel.infons["explanation"]),
                                                                             tokens=json.loads(rel.infons["tokens"].replace("'", '"')),
-                                                                            topk=5)
-                                correct_explanations[rel_type].extend(explanation_tokens)
+                                                                            topk=10)
+                                correct_explanations[rel_type].append(set(explanation_tokens))
                             except json.JSONDecodeError:
-                                n_skipped += 1
+                                pass
 
 
                         continue # already written from true relations
-                    suffix = ""
                 elif signature in fps:
-                    suffix = "_FP"
                     confusion_rels = pair_to_true_relations[(head, tail)]
                     if not confusion_rels:
                         confusion_rels = {"NONE"}
@@ -122,14 +75,11 @@ if __name__ == '__main__':
                                 explanation_tokens = get_explanation_tokens(explanation=json.loads(rel.infons["explanation"]),
                                                                             tokens=json.loads(rel.infons["tokens"].replace("'", '"')),
                                                                             topk=5)
-                                confusion_explanations_false_class[(rel_type, confusion_type)].extend(explanation_tokens)
-                                confusion_texts[(rel_type, confusion_type)].append(rel.infons["tokens"])
-                                confusion_count[(rel_type, confusion_type)] += 1
+                                confusion_explanations[(rel_type, confusion_type)].append(explanation_tokens)
                             except json.JSONDecodeError:
-                                n_skipped += 1
+                                pass
 
                 else:
-                    suffix = "_FN"
                     confusion_rels = pair_to_pred_relations[(head, tail)]
                     for confusion_rel in confusion_rels:
                         if confusion_rel.infons["type"] != "NONE":
@@ -140,68 +90,62 @@ if __name__ == '__main__':
                                                                             tokens=json.loads(confusion_rel.infons["tokens"].replace("'", '"')),
                                                                             topk=5)
                             except json.JSONDecodeError:
-                                n_skipped += 1
                                 explanation_tokens = None
                         else:
                             explanation_tokens = None
 
                         assert confusion_rel.infons["type"] == "NONE"
                         if explanation_tokens:
-                            confusion_explanations_false_class[(confusion_rel.infons["type"], rel_type)].extend(explanation_tokens)
-                        confusion_count[(confusion_rel.infons["type"], rel_type)] += 1
+                            confusion_explanations[(confusion_rel.infons["type"], rel_type)].append(explanation_tokens)
 
-                rel_type = rel.infons["type"] + suffix
-                rels.append(f"R{len(rels) + 1}\t{rel_type} Arg1:{head} Arg2:{tail}\n")
+    return confusion_explanations, correct_explanations
 
-        if args.brat_out:
-            with open(str(args.brat_out / doc.id) + ".txt", "w") as f_txt, \
-                    open(str(args.brat_out / doc.id) + ".ann", "w") as f_ann:
-                f_txt.write(doc.passages[0].text)
-                f_ann.writelines(anns)
-                f_ann.writelines(rels)
-            with (args.brat_out / "annotation.conf").open("w") as f:
-                f.write(
-                    """
-[entities]	 
-CHEMICAL
-GENE-Y
-GENE-N
 
-[relations]
-ACTIVATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-AGONIST Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-AGONIST-ACTIVATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-AGONIST-INHIBITOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-ANTAGONIST Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-DIRECT-REGULATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-INDIRECT-DOWNREGULATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-INDIRECT-UPREGULATOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-INHIBITOR Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-PART-OF Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-PRODUCT-OF Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-SUBSTRATE Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
-SUBSTRATE_PRODUCT-OF Arg1:CHEMICAL, Arg2:GENE-Y|GENE-N|GENE
+if __name__ == '__main__':
+    with open("saved_runs/explainable_bert/predictions.bioc.xml") as f:
+        collection = bioc.load(f)
+        confusion_explanations, correct_explanations = get_base_explanations(collection.documents)
 
-[events]
+    df = {"text": [], "label": [], "prob": [], "explanation": [], "cuid_head": [], "cuid_tail": []}
+    with open("data/ctd/small_positive_explained2.tsv") as f:
+        for line in f:
+            fields = line.strip().split("\t")
+            if len(fields) < 2:
+                continue
 
-[attributes]
-                    """
-                )
-    warnings.warn(f"Skipped {n_skipped}/{n_total} explanations due to invalid tokens")
-    print(f"F1: {n_tps/(n_tps + 0.5 * (n_fps + n_fns))}")
+            text, label, prob, explanation, cuid_head, cuid_tail, _ = fields
+            df["text"].append(text)
+            df["label"].append(label)
+            df["prob"].append(float(prob))
+            df["explanation"].append(explanation)
+            df["cuid_head"].append(cuid_head)
+            df["cuid_tail"].append(cuid_tail)
+    df = pd.DataFrame(df)
+    df[["text", "label", "cuid_head", "cuid_tail"]].to_csv("data/ctd_relabeled/small_relabeled.tsv", sep="\t", header=None)
 
-    for rel_type, explanations in correct_explanations.items():
-        print("=============")
-        print(rel_type)
-        print("=============")
-        print(Counter(explanations).most_common(10))
-        print()
-        print()
+    df_global_confident = df[df.prob > df.prob.quantile(0.75)]
+    df_global_confident[["text", "label", "cuid_head", "cuid_tail"]].to_csv("data/ctd_relabeled/small_relabeled_global_confident.tsv", sep="\t", header=None)
 
-    for confusion_pair, n in sorted(confusion_count.items(), key=lambda x: x[1])[::-1]:
-        print("=============")
-        print(confusion_pair, n)
-        print("=============")
-        print(Counter(confusion_explanations_false_class[confusion_pair]).most_common(10))
-        print()
-        print()
+    df_local_confident = pd.DataFrame()
+    for label in df.label.unique():
+        df_label = df[df.label == label]
+        df_local_confident = pd.concat([df_local_confident, df_label[df_label.prob > df_label.prob.quantile(0.75)]])
+    df_local_confident[["text", "label", "cuid_head", "cuid_tail"]].to_csv("data/ctd_relabeled/small_relabeled_local_confident.tsv", sep="\t", header=None)
+
+    convincing_explanation = []
+    for _, row in df.iterrows():
+        best_jaccard = 0.0
+        best_match = None
+        explanation_tokens = set(row.explanation.split(" "))
+        all_correct_explanations = correct_explanations[row.label]
+        for expl in all_correct_explanations:
+            jaccard = len(expl & explanation_tokens) / len(expl | explanation_tokens)
+            if jaccard > best_jaccard:
+                best_match = expl & explanation_tokens
+                best_jaccard = jaccard
+        convincing_explanation.append(best_jaccard >= 0.34)
+    df["convincing_explanation"] = convincing_explanation
+    df_convincing_explanation = df[df["convincing_explanation"]]
+    df_convincing_explanation[["text", "label", "cuid_head", "cuid_tail"]].to_csv("data/ctd_relabeled/small_relabeled_convincing_explanation.tsv", sep="\t", header=None)
+
+

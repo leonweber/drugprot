@@ -146,6 +146,7 @@ def log_hyperparameters(
     # choose which parts of hydra config will be saved to loggers
     hparams["trainer"] = config["trainer"]
     hparams["model"] = config["model"]
+    hparams["seed"] = config["seed"]
     hparams["finetune_trainer"] = config["finetune_trainer"]
     hparams["data"] = config["data"]
     hparams["out_dir"] = os.path.abspath(os.getcwd())

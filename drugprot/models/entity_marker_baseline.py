@@ -16,6 +16,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from transformers.file_utils import ModelOutput
 import torch.nn.functional as F
+from segtok.segmenter import split_single
 
 from drugprot import utils
 
@@ -37,9 +38,13 @@ class MultitaskClassifierOutput(ModelOutput):
 
 
 def sentence_to_examples(
-    sentence, tokenizer, doc_context, pair_types, mark_with_special_tokens, blind_entities, label_to_id=None, max_length=512, use_none_class=False
+    sentence, tokenizer, doc_context, pair_types, mark_with_special_tokens, blind_entities, label_to_id=None, max_length=512, use_none_class=False,
+        entity_to_side_information=None, pair_to_side_information=None
 ):
     examples = []
+
+    pair_to_side_information = pair_to_side_information or {}
+    entity_to_side_information = entity_to_side_information or {}
 
     ann_id_to_ann = {}
     for ann in sentence.annotations:
@@ -74,9 +79,70 @@ def sentence_to_examples(
                     mark_with_special_tokens=mark_with_special_tokens, blind_entities=blind_entities
                 )
 
-            features = tokenizer.encode_plus(
-                text, max_length=max_length, truncation=True
+            pair_side_info = pair_to_side_information.get((head.infons["identifier"], tail.infons["identifier"]), "")
+
+            head_side_info = entity_to_side_information.get(head.infons["identifier"], "")
+            tail_side_info = entity_to_side_information.get(tail.infons["identifier"], "")
+
+            if head_side_info and tail_side_info:
+                head_side_info = split_single(head_side_info)[0]
+                tail_side_info = split_single(tail_side_info)[0]
+
+            side_info = f"{pair_side_info} | {head_side_info} | {tail_side_info} [SEP]"
+
+            if mark_with_special_tokens:
+                marker = "[HEAD-E]"
+            else:
+                marker = "@"
+
+            sentences_text = split_single(text)
+            idx_pair_sentence = [i for i, s in enumerate(sentences_text) if marker in s][0]
+            chosen_sentences = [sentences_text[idx_pair_sentence]]
+
+            # Prepend Context
+            i = idx_pair_sentence-1
+            while i >= 0:
+                features_text = tokenizer.encode_plus(
+                    text=" ".join([sentences_text[i]] + chosen_sentences),  max_length=max_length, truncation="longest_first"
+                )
+                len_remaining = max_length - len(features_text.input_ids)
+
+                if len_remaining <= 0:
+                    break
+                else:
+                    chosen_sentences = [sentences_text[i]] + chosen_sentences
+                i -= 1
+
+            # Append Context
+            i = idx_pair_sentence+1
+            while i < len(sentences_text):
+                features_text = tokenizer.encode_plus(
+                    text=" ".join(chosen_sentences + [sentences_text[i]]),  max_length=max_length, truncation="longest_first"
+                )
+                len_remaining = max_length - len(features_text.input_ids)
+
+                if len_remaining <= 0:
+                    break
+                else:
+                    chosen_sentences = chosen_sentences + [sentences_text[i]]
+                i += 1
+
+            features_text = tokenizer.encode_plus(
+                text=" ".join(chosen_sentences),  max_length=max_length, truncation="longest_first"
             )
+            len_remaining = max_length - len(features_text.input_ids)
+
+            features_side = tokenizer.encode_plus(
+                side_info, max_length=len_remaining, truncation="longest_first", add_special_tokens=False
+            )
+
+            features = {
+                "input_ids": features_text.input_ids + features_side.input_ids,
+                "attention_mask": features_text.attention_mask + features_side.attention_mask
+            }
+
+            if "token_type_ids" in features_text:
+                features["token_type_ids"] = [0] * len(features_text.input_ids) + [1] * len(features_side.input_ids)
 
             if mark_with_special_tokens:
                 try:
@@ -241,12 +307,15 @@ def insert_pair_markers(text, head, tail, sentence_offset, mark_with_special_tok
 class BiocDataset:
     def __init__(self, path, tokenizer, limit_examples, use_doc_context,
                  mark_with_special_tokens, blind_entities, max_length,
+                 entity_to_side_information, pair_to_side_information,
                  use_none_class=False):
         self.examples = []
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.meta = utils.get_dataset_metadata(path)
         self.use_none_class = use_none_class
+        self.entity_to_side_information = entity_to_side_information
+        self.pair_to_side_information = pair_to_side_information
         with open(hydra.utils.to_absolute_path(path)) as f:
             collection = bioc.load(f)
             doc: bioc.BioCDocument
@@ -268,11 +337,78 @@ class BiocDataset:
                             mark_with_special_tokens=mark_with_special_tokens,
                             blind_entities=blind_entities,
                             max_length=self.max_length,
-                            use_none_class=use_none_class
+                            use_none_class=use_none_class,
+                            entity_to_side_information=self.entity_to_side_information,
+                            pair_to_side_information=self.pair_to_side_information
                         )
 
                         if limit_examples and len(self.examples) > limit_examples:
                             break
+
+    def __getitem__(self, item):
+        example = self.examples[item]["features"].copy()
+        example["meta"] = self.meta
+
+        return example
+
+    def __len__(self):
+        return len(self.examples)
+
+
+class TSVDataset:
+    def __init__(self, path, tokenizer,
+                 limit_examples, max_length,
+                 entity_to_side_information=None,
+                 use_none_class=False):
+        self.examples = []
+        self.meta = utils.get_dataset_metadata(path)
+        with open(hydra.utils.to_absolute_path(path)) as f:
+            for line in f:
+                fields = line.strip().split("\t")
+                if len(fields) <= 1:
+                    continue
+
+                _, text, label, cuid_head, cuid_tail = fields
+                # pair_side_info = pair_to_side_information.get((head.infons["identifier"], tail.infons["identifier"]), "")
+                pair_side_info = ""
+                head_side_info = entity_to_side_information.get(cuid_head, "")
+                tail_side_info = entity_to_side_information.get(cuid_tail, "")
+                #
+                side_info = f"{pair_side_info} | {head_side_info} | {tail_side_info} [SEP]"
+
+                features_text = tokenizer.encode_plus(
+                    text=text,  max_length=max_length, truncation="longest_first"
+                )
+                len_remaining = max_length - len(features_text.input_ids)
+
+                features_side = tokenizer.encode_plus(
+                    side_info, max_length=len_remaining, truncation="longest_first", add_special_tokens=False
+                )
+
+                features = {
+                    "input_ids": features_text.input_ids + features_side.input_ids,
+                    "attention_mask": features_text.attention_mask + features_side.attention_mask
+                }
+
+                if "token_type_ids" in features_text:
+                    features["token_type_ids"] = [0] * len(features_text.input_ids) + [1] * len(features_side.input_ids)
+
+                try:
+                    assert "HEAD-S" in tokenizer.decode(features["input_ids"])
+                    assert "HEAD-E" in tokenizer.decode(features["input_ids"])
+                    assert "TAIL-S" in tokenizer.decode(features["input_ids"])
+                    assert "TAIL-E" in tokenizer.decode(features["input_ids"])
+                except AssertionError:
+                    log.warning("Truncated entity")
+                    continue
+
+                features["labels"] = np.zeros(len(self.meta.label_to_id))
+                features["labels"][self.meta.label_to_id[label]] = 1
+
+                if use_none_class and features["labels"].sum() == 0:
+                    features["labels"][0] = 1
+
+                self.examples.append({"head": "TODO", "tail": "TODO", "features": features})
 
     def __getitem__(self, item):
         example = self.examples[item]["features"].copy()
@@ -300,9 +436,27 @@ class EntityMarkerBaseline(pl.LightningModule):
         use_starts: bool = False,
         use_ends: bool = False,
         mark_with_special_tokens: bool = True,
-        blind_entities: bool = True,
+        blind_entities: bool = False,
+        entity_side_information = None,
+        pair_side_information = None,
+        use_none_class = True,
     ):
         super().__init__()
+
+        self.use_none_class = use_none_class
+        self.entity_side_information = {}
+        if entity_side_information is not None:
+            with open(hydra.utils.to_absolute_path(Path("data") / "side_information" / entity_side_information)) as f:
+                for line in f:
+                    cuid, side_info = line.strip("\n").split("\t")
+                    self.entity_side_information[cuid] = side_info
+
+        self.pair_side_information = {}
+        if pair_side_information is not None:
+            with open(hydra.utils.to_absolute_path(Path("data") / "side_information" / pair_side_information)) as f:
+                for line in f:
+                    cuid_head, cuid_tail, side_info = line.strip("\n").split("\t")
+                    self.pair_side_information[(cuid_head, cuid_tail)] = side_info
 
         self.use_cls = use_cls
         self.max_length = max_length
@@ -360,10 +514,10 @@ class EntityMarkerBaseline(pl.LightningModule):
                 seq_rep_size, len(meta.label_to_id)
             )
             self.dataset_to_train_f1[dataset] = torchmetrics.F1(
-                num_classes=len(meta.label_to_id)
+                num_classes=len(meta.label_to_id) - 1
             )
             self.dataset_to_dev_f1[dataset] = torchmetrics.F1(
-                num_classes=len(meta.label_to_id)
+                num_classes=len(meta.label_to_id) - 1
             )
 
         self.lr = lr
@@ -374,7 +528,7 @@ class EntityMarkerBaseline(pl.LightningModule):
         meta = data[0].pop("meta")
         for i in data[1:]:
             m = i.pop("meta")
-            assert m == meta
+            assert m.label_to_id == meta.label_to_id
         collator = transformers.DataCollatorWithPadding(self.tokenizer)
         batch = collator(data)
         batch["meta"] = meta
@@ -382,11 +536,17 @@ class EntityMarkerBaseline(pl.LightningModule):
         return batch
 
     def forward(self, features):
-        output = self.transformer(
-            input_ids=features["input_ids"],
-            token_type_ids=features["token_type_ids"],
-            attention_mask=features["attention_mask"],
-        )
+        if "token_type_ids" in features:
+            output = self.transformer(
+                input_ids=features["input_ids"],
+                token_type_ids=features["token_type_ids"],
+                attention_mask=features["attention_mask"],
+            )
+        else:
+            output = self.transformer(
+                input_ids=features["input_ids"],
+                attention_mask=features["attention_mask"],
+            )
         seq_emb = self.dropout(output.last_hidden_state)
 
         seq_reps = []
@@ -450,7 +610,7 @@ class EntityMarkerBaseline(pl.LightningModule):
         indicators = self.logits_to_indicators(output.dataset_to_logits[dataset]).to(
             self.device
         )
-        train_f1(indicators.float().cpu(), batch["labels"].long().cpu())
+        train_f1(indicators.float().cpu()[:, 1:], batch["labels"].long().cpu()[:, 1:])
         self.log(f"{dataset}/train/loss", output.loss, prog_bar=False)
         if dataset == "drugprot":
             self.log(f"{dataset}/train/f1", train_f1, prog_bar=True)
@@ -466,7 +626,7 @@ class EntityMarkerBaseline(pl.LightningModule):
         indicators = self.logits_to_indicators(output.dataset_to_logits[dataset]).to(
             self.device
         )
-        val_f1(indicators.float().cpu(), batch["labels"].long().cpu())
+        val_f1(indicators.float().cpu()[:, 1:], batch["labels"].long().cpu()[:, 1:])
         self.log(f"{dataset}/val/loss", output.loss, prog_bar=False)
         if dataset == "drugprot":
             self.log(f"{dataset}/val/f1", val_f1, prog_bar=True)
@@ -511,7 +671,9 @@ class EntityMarkerBaseline(pl.LightningModule):
                                 label_to_id=None,
                                 max_length=self.max_length,
                                 mark_with_special_tokens=self.mark_with_special_tokens,
-                                blind_entities=self.blind_entities
+                                blind_entities=self.blind_entities,
+                                entity_to_side_information=self.entity_side_information,
+                                pair_to_side_information=self.pair_side_information
                             )
                         else:
                             examples = sentence_to_examples(
@@ -522,7 +684,9 @@ class EntityMarkerBaseline(pl.LightningModule):
                                 label_to_id=None,
                                 max_length=self.max_length,
                                 mark_with_special_tokens=self.mark_with_special_tokens,
-                                blind_entities=self.blind_entities
+                                blind_entities=self.blind_entities,
+                                entity_to_side_information=self.entity_side_information,
+                                pair_to_side_information=self.pair_side_information
                             )
                         if examples:
                             batch = collator([i["features"] for i in examples])
@@ -542,7 +706,7 @@ class EntityMarkerBaseline(pl.LightningModule):
                                     rel.infons["type"] = (
                                         dataset
                                         + "/"
-                                        + self.dataset_to_meta[dataset]["id_to_label"][
+                                        + self.dataset_to_meta[dataset].id_to_label[
                                             label_idx.item()
                                         ]
                                     )
@@ -553,8 +717,14 @@ class EntityMarkerBaseline(pl.LightningModule):
         return None
 
     def get_dataset(self, path, limit_examples=None):
-        return BiocDataset(path, self.tokenizer, limit_examples=limit_examples,
-                           use_doc_context=self.use_doc_context,
-                           mark_with_special_tokens=self.mark_with_special_tokens,
-                           blind_entities=self.blind_entities,
-                           max_length=self.max_length)
+        if str(path).endswith(".bioc.xml"):
+            return BiocDataset(path, self.tokenizer, limit_examples=limit_examples,
+                               use_doc_context=self.use_doc_context,
+                               mark_with_special_tokens=self.mark_with_special_tokens,
+                               blind_entities=self.blind_entities,
+                               max_length=self.max_length,
+                               entity_to_side_information=self.entity_side_information,
+                               pair_to_side_information=self.pair_side_information,
+                               use_none_class=self.use_none_class)
+        elif str(path).endswith(".tsv"):
+            return TSVDataset(path=path, tokenizer=self.tokenizer, limit_examples=limit_examples, max_length=self.max_length, entity_to_side_information=self.entity_side_information, use_none_class=self.use_none_class)

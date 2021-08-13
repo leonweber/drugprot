@@ -1,6 +1,6 @@
 _target_: drugprot.models.entity_marker_baseline.EntityMarkerBaseline
 
-transformer: microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract
+transformer: /vol/fob-vol1/mi15/weberple/weberple/transformers/RoBERTa-large-PM-M3-Voc-hf
 lr: 3e-5
 finetune_lr: 1e-5
 loss: bce
@@ -9,7 +9,10 @@ use_doc_context: false
 use_cls: true
 use_starts: false
 use_ends: false
-mark_with_special_tokens: false
+mark_with_special_tokens: true
 blind_entities: false
 optimized_metric: drugprot/val/f1
 max_length: 128
+entity_side_information: null
+pair_side_information: null
+use_none_class: false
