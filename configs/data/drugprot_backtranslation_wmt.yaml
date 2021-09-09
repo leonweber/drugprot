@@ -1,0 +1,11 @@
+train:
+  - data/drugprot_biosyn_norm/train.bioc.xml
+  - data/drugprot_backtranslation/wmt19-de-en_sent.bioc.xml
+dev: data/drugprot_biosyn_norm/dev.bioc.xml
+predict: data/drugprot_biosyn_norm/dev.bioc.xml
+finetune: null
+limit_examples: null
+limit_documents: null
+checkpoint: null
+dataset_to_batch_size:
+  drugprot: 16

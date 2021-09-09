@@ -1,0 +1,9 @@
+train:
+  - data/drugprot/train.bioc.xml
+  - data/eu_adr/euadr.bioc.xml
+dev: data/drugprot/dev.bioc.xml
+predict: data/drugprot/dev.bioc.xml
+finetune:
+  - data/drugprot/train.bioc.xml
+limit_examples: null
+checkpoint: null

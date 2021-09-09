@@ -8,3 +8,4 @@ limit_examples: null
 checkpoint: null
 dataset_to_batch_size:
   drugprot: 16
+  ctd_relabeled: 16

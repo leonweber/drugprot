@@ -56,11 +56,11 @@ def train(config: DictConfig) -> Optional[float]:
 
     if config["trainer"]["_target_"] != "None":
         train_datasets = [
-            model.get_dataset(i, limit_examples=config["data"]["limit_examples"])
+            model.get_dataset(i, limit_examples=config["data"]["limit_examples"], limit_documents=config["data"]["limit_documents"])
             for i in config["data"]["train"]
         ]
         dev_data = model.get_dataset(
-            config["data"]["dev"], limit_examples=config["data"]["limit_examples"]
+            config["data"]["dev"], limit_examples=config["data"]["limit_examples"], limit_documents=config["data"]["limit_documents"]
         )
 
         # Init Lightning callbacks
@@ -153,7 +153,7 @@ def train(config: DictConfig) -> Optional[float]:
     ):
         model.lr = model.finetune_lr
         finetune_datasets = [
-            model.get_dataset(i, limit_examples=config["data"]["limit_examples"])
+            model.get_dataset(i, limit_examples=config["data"]["limit_examples"], limit_documents=config["data"]["limit_documents"])
             for i in config["data"]["finetune"]
         ]
         finetune_dataset = MultiTaskDataset(datasets=train_datasets)

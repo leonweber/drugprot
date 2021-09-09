@@ -107,7 +107,7 @@ if __name__ == '__main__':
         confusion_explanations, correct_explanations = get_base_explanations(collection.documents)
 
     df = {"text": [], "label": [], "prob": [], "explanation": [], "cuid_head": [], "cuid_tail": []}
-    with open("data/ctd/small_positive_explained2.tsv") as f:
+    with open("data/ctd/small_positive_explained.tsv") as f:
         for line in f:
             fields = line.strip().split("\t")
             if len(fields) < 2:
@@ -121,16 +121,19 @@ if __name__ == '__main__':
             df["cuid_head"].append(cuid_head)
             df["cuid_tail"].append(cuid_tail)
     df = pd.DataFrame(df)
-    df[["text", "label", "cuid_head", "cuid_tail"]].to_csv("data/ctd_relabeled/small_relabeled.tsv", sep="\t", header=None)
+    df["head_type"] = "Chemical"
+    df["tail_type"] = "Gene"
+    df["pmid"] = 1
+    df[["head_type", "cuid_head", "tail_type", "cuid_tail", "label", "text", "pmid"]].to_csv("data/ctd_relabeled/small_relabeled.tsv", sep="\t", header=None, index=False)
 
     df_global_confident = df[df.prob > df.prob.quantile(0.75)]
-    df_global_confident[["text", "label", "cuid_head", "cuid_tail"]].to_csv("data/ctd_relabeled/small_relabeled_global_confident.tsv", sep="\t", header=None)
+    df_global_confident[["head_type", "cuid_head", "tail_type", "cuid_tail", "label", "text", "pmid"]].to_csv("data/ctd_relabeled/small_relabeled_global_confident.tsv", sep="\t", header=None, index=False)
 
     df_local_confident = pd.DataFrame()
     for label in df.label.unique():
         df_label = df[df.label == label]
         df_local_confident = pd.concat([df_local_confident, df_label[df_label.prob > df_label.prob.quantile(0.75)]])
-    df_local_confident[["text", "label", "cuid_head", "cuid_tail"]].to_csv("data/ctd_relabeled/small_relabeled_local_confident.tsv", sep="\t", header=None)
+    df_local_confident[["head_type", "cuid_head", "tail_type", "cuid_tail", "label", "text", "pmid"]].to_csv("data/ctd_relabeled/small_relabeled_local_confident.tsv", sep="\t", header=None, index=False)
 
     convincing_explanation = []
     for _, row in df.iterrows():
@@ -146,6 +149,6 @@ if __name__ == '__main__':
         convincing_explanation.append(best_jaccard >= 0.34)
     df["convincing_explanation"] = convincing_explanation
     df_convincing_explanation = df[df["convincing_explanation"]]
-    df_convincing_explanation[["text", "label", "cuid_head", "cuid_tail"]].to_csv("data/ctd_relabeled/small_relabeled_convincing_explanation.tsv", sep="\t", header=None)
+    df_convincing_explanation[["head_type", "cuid_head", "tail_type", "cuid_tail", "label", "text", "pmid"]].to_csv("data/ctd_relabeled/small_relabeled_convincing_explanation.tsv", sep="\t", header=None, index=False)
 
 

@@ -1,3 +1,4 @@
+import pickle
 import warnings
 from collections import defaultdict
 from dataclasses import dataclass
@@ -12,11 +13,11 @@ import bioc
 import torchmetrics
 import transformers
 from torch import nn
-from torch.utils.data import Dataset
 from tqdm import tqdm
 from transformers.file_utils import ModelOutput
 import torch.nn.functional as F
 from segtok.segmenter import split_single
+from transformers.modeling_outputs import SequenceClassifierOutput
 
 from drugprot import utils
 
@@ -39,7 +40,7 @@ class MultitaskClassifierOutput(ModelOutput):
 
 def sentence_to_examples(
     sentence, tokenizer, doc_context, pair_types, mark_with_special_tokens, blind_entities, label_to_id=None, max_length=512, use_none_class=False,
-        entity_to_side_information=None, pair_to_side_information=None
+        entity_to_side_information=None, pair_to_side_information=None, entity_to_embedding_index=None
 ):
     examples = []
 
@@ -153,6 +154,10 @@ def sentence_to_examples(
                 except AssertionError:
                     log.warning("Truncated entity")
                     continue  # entity was truncated
+
+            if entity_to_embedding_index:
+                features["e1_embedding_index"] = entity_to_embedding_index.get("MESH:" + head.infons["identifier"].split("|")[0], -1) + 1
+                features["e2_embedding_index"] = entity_to_embedding_index.get("NCBI:" + tail.infons["identifier"].split("|")[0], -1) + 1
 
             if label_to_id:
                 features["labels"] = np.zeros(len(label_to_id))
@@ -305,10 +310,10 @@ def insert_pair_markers(text, head, tail, sentence_offset, mark_with_special_tok
 
 
 class BiocDataset:
-    def __init__(self, path, tokenizer, limit_examples, use_doc_context,
+    def __init__(self, path, tokenizer, limit_examples, limit_documents, use_doc_context,
                  mark_with_special_tokens, blind_entities, max_length,
                  entity_to_side_information, pair_to_side_information,
-                 use_none_class=False):
+                 entity_to_embedding_index, use_none_class=False):
         self.examples = []
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -316,10 +321,11 @@ class BiocDataset:
         self.use_none_class = use_none_class
         self.entity_to_side_information = entity_to_side_information
         self.pair_to_side_information = pair_to_side_information
+        self.entity_to_embedding_index = entity_to_embedding_index
         with open(hydra.utils.to_absolute_path(path)) as f:
             collection = bioc.load(f)
             doc: bioc.BioCDocument
-            for doc in tqdm(collection.documents, desc="Loading data"):
+            for doc in tqdm(collection.documents[:limit_documents], desc="Loading data"):
                 if limit_examples and len(self.examples) > limit_examples:
                     break
                 for passage in doc.passages:
@@ -339,7 +345,8 @@ class BiocDataset:
                             max_length=self.max_length,
                             use_none_class=use_none_class,
                             entity_to_side_information=self.entity_to_side_information,
-                            pair_to_side_information=self.pair_to_side_information
+                            pair_to_side_information=self.pair_to_side_information,
+                            entity_to_embedding_index=self.entity_to_embedding_index
                         )
 
                         if limit_examples and len(self.examples) > limit_examples:
@@ -363,52 +370,56 @@ class TSVDataset:
         self.examples = []
         self.meta = utils.get_dataset_metadata(path)
         with open(hydra.utils.to_absolute_path(path)) as f:
-            for line in f:
-                fields = line.strip().split("\t")
-                if len(fields) <= 1:
-                    continue
+            lines = f.readlines()
+        if limit_examples:
+            lines = lines[:limit_examples]
+        for line in tqdm(lines):
+            fields = line.strip().split("\t")
+            if len(fields) <= 1:
+                continue
 
-                _, text, label, cuid_head, cuid_tail = fields
-                # pair_side_info = pair_to_side_information.get((head.infons["identifier"], tail.infons["identifier"]), "")
-                pair_side_info = ""
-                head_side_info = entity_to_side_information.get(cuid_head, "")
-                tail_side_info = entity_to_side_information.get(cuid_tail, "")
-                #
-                side_info = f"{pair_side_info} | {head_side_info} | {tail_side_info} [SEP]"
+            type_head, cuid_head, type_tail, cuid_tail, label, text, pmid = fields
+            # pair_side_info = pair_to_side_information.get((head.infons["identifier"], tail.infons["identifier"]), "")
+            pair_side_info = ""
+            head_side_info = entity_to_side_information.get(cuid_head, "")
+            tail_side_info = entity_to_side_information.get(cuid_tail, "")
+            #
+            side_info = f"{pair_side_info} | {head_side_info} | {tail_side_info} [SEP]"
 
-                features_text = tokenizer.encode_plus(
-                    text=text,  max_length=max_length, truncation="longest_first"
-                )
-                len_remaining = max_length - len(features_text.input_ids)
+            features_text = tokenizer.encode_plus(
+                text=text,  max_length=max_length, truncation="longest_first"
+            )
+            len_remaining = max_length - len(features_text.input_ids)
 
-                features_side = tokenizer.encode_plus(
-                    side_info, max_length=len_remaining, truncation="longest_first", add_special_tokens=False
-                )
+            features_side = tokenizer.encode_plus(
+                side_info, max_length=len_remaining, truncation="longest_first", add_special_tokens=False
+            )
 
-                features = {
-                    "input_ids": features_text.input_ids + features_side.input_ids,
-                    "attention_mask": features_text.attention_mask + features_side.attention_mask
-                }
+            features = {
+                "input_ids": features_text.input_ids + features_side.input_ids,
+                "attention_mask": features_text.attention_mask + features_side.attention_mask
+            }
 
-                if "token_type_ids" in features_text:
-                    features["token_type_ids"] = [0] * len(features_text.input_ids) + [1] * len(features_side.input_ids)
+            if "token_type_ids" in features_text:
+                features["token_type_ids"] = [0] * len(features_text.input_ids) + [1] * len(features_side.input_ids)
 
-                try:
-                    assert "HEAD-S" in tokenizer.decode(features["input_ids"])
-                    assert "HEAD-E" in tokenizer.decode(features["input_ids"])
-                    assert "TAIL-S" in tokenizer.decode(features["input_ids"])
-                    assert "TAIL-E" in tokenizer.decode(features["input_ids"])
-                except AssertionError:
-                    log.warning("Truncated entity")
-                    continue
+            try:
+                assert "HEAD-S" in tokenizer.decode(features["input_ids"])
+                assert "HEAD-E" in tokenizer.decode(features["input_ids"])
+                assert "TAIL-S" in tokenizer.decode(features["input_ids"])
+                assert "TAIL-E" in tokenizer.decode(features["input_ids"])
+            except AssertionError:
+                log.warning("Truncated entity")
+                continue
 
-                features["labels"] = np.zeros(len(self.meta.label_to_id))
-                features["labels"][self.meta.label_to_id[label]] = 1
+            features["labels"] = np.zeros(len(self.meta.label_to_id))
+            for l in label.split(","):
+                features["labels"][self.meta.label_to_id[l]] = 1
 
-                if use_none_class and features["labels"].sum() == 0:
-                    features["labels"][0] = 1
+            if use_none_class and features["labels"].sum() == 0:
+                features["labels"][0] = 1
 
-                self.examples.append({"head": "TODO", "tail": "TODO", "features": features})
+            self.examples.append({"head": "TODO", "tail": "TODO", "features": features})
 
     def __getitem__(self, item):
         example = self.examples[item]["features"].copy()
@@ -440,9 +451,12 @@ class EntityMarkerBaseline(pl.LightningModule):
         entity_side_information = None,
         pair_side_information = None,
         use_none_class = True,
+        entity_embeddings = None,
+        weight_decay=0.0
     ):
         super().__init__()
 
+        self.weight_decay = weight_decay
         self.use_none_class = use_none_class
         self.entity_side_information = {}
         if entity_side_information is not None:
@@ -499,7 +513,6 @@ class EntityMarkerBaseline(pl.LightningModule):
             self.transformer.resize_token_embeddings(len(self.tokenizer))
         self.dropout = nn.Dropout(self.transformer.config.hidden_dropout_prob)
 
-        self.dataset_to_classifier = nn.ModuleDict()
         self.dataset_to_train_f1 = {}
         self.dataset_to_dev_f1 = {}
         seq_rep_size = 0
@@ -509,16 +522,40 @@ class EntityMarkerBaseline(pl.LightningModule):
             seq_rep_size += 2 * self.transformer.config.hidden_size
         if use_ends:
             seq_rep_size += 2 * self.transformer.config.hidden_size
+        if entity_embeddings:
+            entity_embeddings = Path(entity_embeddings)
+            with open(entity_embeddings / "embeddings.pkl", "rb") as f:
+                embeddings = pickle.load(f)
+                self.entity_embeddings = nn.Embedding(embeddings.shape[0] + 1, embeddings.shape[1])
+                with torch.no_grad():
+                    self.entity_embeddings.weight[0, :] = 0
+                    self.entity_embeddings.weight[1:] = nn.Parameter(embeddings)
+                self.entity_embeddings.requires_grad = False
+                self.entity_mlp = nn.Sequential(nn.Linear(self.entity_embeddings.embedding_dim*2, 100), nn.ReLU(), nn.Dropout(0.5), nn.Linear(100, 100), nn.Dropout(0.5))
+                seq_rep_size += 100
+            self.entity_to_embedding_index = {}
+            with open(entity_embeddings / "entities.dict") as f:
+                for line in f:
+                    fields = line.strip().split("\t")
+                    index = int(fields[1])
+                    self.entity_to_embedding_index[fields[0]] = index
+        else:
+            self.entity_embeddings = None
+            self.entity_to_embedding_index = None
+
+
+        self.meta = dataset_to_meta["drugprot"]
+        self.classifier = nn.Linear(
+            seq_rep_size, len(self.meta.label_to_id)
+        )
         for dataset, meta in dataset_to_meta.items():
-            self.dataset_to_classifier[dataset] = nn.Linear(
-                seq_rep_size, len(meta.label_to_id)
-            )
             self.dataset_to_train_f1[dataset] = torchmetrics.F1(
-                num_classes=len(meta.label_to_id) - 1
+                num_classes=len(self.meta.label_to_id) - 1
             )
             self.dataset_to_dev_f1[dataset] = torchmetrics.F1(
-                num_classes=len(meta.label_to_id) - 1
+                num_classes=len(self.meta.label_to_id) - 1
             )
+
 
         self.lr = lr
         self.finetune_lr = finetune_lr
@@ -583,19 +620,26 @@ class EntityMarkerBaseline(pl.LightningModule):
             seq_reps.append(end_pair_rep)
 
         seq_reps = torch.cat(seq_reps, dim=1)
-        dataset_to_logits = {}
+        if self.entity_embeddings:
+            e1_embeddings = self.entity_embeddings(features["e1_embedding_index"])
+            e2_embeddings = self.entity_embeddings(features["e2_embedding_index"])
+            pair_embeddings = self.entity_mlp(torch.cat([e1_embeddings, e2_embeddings], dim=1))
+            seq_reps = torch.cat([seq_reps, pair_embeddings], dim=1)
+        datset_type = features["meta"].type
 
-        for dataset, classifier in self.dataset_to_classifier.items():
-            dataset_to_logits[dataset] = classifier(seq_reps)
+        logits = self.classifier(seq_reps)
         if "labels" in features:
-            logits = dataset_to_logits[features["meta"].name]
-            loss = self.loss(logits, features["labels"])
+            if datset_type == "distant":
+                pooled_logits = torch.logsumexp(logits, dim=1)
+                loss = self.loss(pooled_logits, torch.ones_like(pooled_logits))
+            else:
+                loss = self.loss(logits, features["labels"])
         else:
             loss = None
 
-        return MultitaskClassifierOutput(
+        return SequenceClassifierOutput(
             loss=loss,
-            dataset_to_logits=dataset_to_logits,
+            logits=logits,
             hidden_states=output.hidden_states,
             attentions=output.attentions,
         )
@@ -607,37 +651,43 @@ class EntityMarkerBaseline(pl.LightningModule):
 
         self.log("total/train/loss", output.loss, prog_bar=True)
         train_f1 = self.dataset_to_dev_f1[dataset]
-        indicators = self.logits_to_indicators(output.dataset_to_logits[dataset]).to(
+        indicators = self.logits_to_indicators(output.logits).to(
             self.device
         )
-        train_f1(indicators.float().cpu()[:, 1:], batch["labels"].long().cpu()[:, 1:])
-        self.log(f"{dataset}/train/loss", output.loss, prog_bar=False)
-        if dataset == "drugprot":
-            self.log(f"{dataset}/train/f1", train_f1, prog_bar=True)
-        else:
-            self.log(f"{dataset}/train/f1", train_f1, prog_bar=False)
+        if batch["meta"].type == "sentence":
+            train_f1(indicators.float().cpu()[:, 1:], batch["labels"].long().cpu()[:, 1:])
+            self.log(f"{dataset}/train/loss", output.loss, prog_bar=False)
+            if dataset == "drugprot":
+                self.log(f"{dataset}/train/f1", train_f1, prog_bar=True)
+            else:
+                self.log(f"{dataset}/train/f1", train_f1, prog_bar=False)
         return output.loss
 
     def validation_step(self, batch, batch_idx):
         dataset = batch["meta"].name
         output = self.forward(batch)
         self.log("total/val/loss", output.loss, prog_bar=True)
-        val_f1 = self.dataset_to_dev_f1[dataset]
-        indicators = self.logits_to_indicators(output.dataset_to_logits[dataset]).to(
-            self.device
-        )
-        val_f1(indicators.float().cpu()[:, 1:], batch["labels"].long().cpu()[:, 1:])
-        self.log(f"{dataset}/val/loss", output.loss, prog_bar=False)
-        if dataset == "drugprot":
-            self.log(f"{dataset}/val/f1", val_f1, prog_bar=True)
-        else:
-            self.log(f"{dataset}/val/f1", val_f1, prog_bar=False)
+        if batch["meta"].type == "sentence":
+            val_f1 = self.dataset_to_dev_f1[dataset]
+            indicators = self.logits_to_indicators(output.logits.to(self.device))
+            val_f1(indicators.float().cpu()[:, 1:], batch["labels"].long().cpu()[:, 1:])
+            self.log(f"{dataset}/val/loss", output.loss, prog_bar=False)
+            if dataset == "drugprot":
+                self.log(f"{dataset}/val/f1", val_f1, prog_bar=True)
+            else:
+                self.log(f"{dataset}/val/f1", val_f1, prog_bar=False)
 
         return output.loss
 
     def configure_optimizers(self):
+        params = list(self.named_parameters())
+        grouped_parameters = [
+            {"params": [p for n, p in params if "entity_mlp" in n], 'lr': 1e-3},
+            {"params": [p for n, p in params if "entity_mlp" not in n], 'lr': self.lr},
+        ]
         assert self.num_training_steps > 0
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(grouped_parameters, lr=self.lr)
+                                      # weight_decay=self.weight_decay)
         schedule = transformers.get_linear_schedule_with_warmup(
             optimizer,
             num_warmup_steps=0.1 * self.num_training_steps,
@@ -658,73 +708,75 @@ class EntityMarkerBaseline(pl.LightningModule):
     def predict(self, collection: bioc.BioCCollection) -> None:
         collator = transformers.DataCollatorWithPadding(self.tokenizer)
         it = tqdm(collection.documents, desc="Predicting")
+        meta = utils.get_dataset_metadata("data/drugprot/train.bioc.xml")
         for doc in it:
-            for dataset, meta in self.dataset_to_meta.items():
-                for passage in doc.passages:
-                    for sent in passage.sentences:
-                        if self.use_doc_context:
-                            examples = sentence_to_examples(
-                                sent,
-                                self.tokenizer,
-                                doc_context=doc.passages[0].text,
-                                pair_types=meta.pair_types,
-                                label_to_id=None,
-                                max_length=self.max_length,
-                                mark_with_special_tokens=self.mark_with_special_tokens,
-                                blind_entities=self.blind_entities,
-                                entity_to_side_information=self.entity_side_information,
-                                pair_to_side_information=self.pair_side_information
-                            )
-                        else:
-                            examples = sentence_to_examples(
-                                sent,
-                                self.tokenizer,
-                                doc_context=None,
-                                pair_types=meta.pair_types,
-                                label_to_id=None,
-                                max_length=self.max_length,
-                                mark_with_special_tokens=self.mark_with_special_tokens,
-                                blind_entities=self.blind_entities,
-                                entity_to_side_information=self.entity_side_information,
-                                pair_to_side_information=self.pair_side_information
-                            )
-                        if examples:
-                            batch = collator([i["features"] for i in examples])
-                            for k, v in batch.items():
-                                batch[k] = v.to(self.device)
-                            out = self.forward(batch)
-                            dataset_logits = out.dataset_to_logits[dataset]
-                            preds = self.logits_to_indicators(dataset_logits)
-                            for example, preds, logits in zip(
-                                examples, preds, dataset_logits
-                            ):
-                                head = example["head"]
-                                tail = example["tail"]
-                                for label_idx in torch.where(preds)[0]:
-                                    rel = bioc.BioCRelation()
-                                    rel.infons["prob"] = logits[label_idx.item()]
-                                    rel.infons["type"] = (
-                                        dataset
-                                        + "/"
-                                        + self.dataset_to_meta[dataset].id_to_label[
-                                            label_idx.item()
-                                        ]
-                                    )
-                                    rel.add_node(bioc.BioCNode(refid=head, role="head"))
-                                    rel.add_node(bioc.BioCNode(refid=tail, role="tail"))
-                                    sent.add_relation(rel)
+            for passage in doc.passages:
+                for sent in passage.sentences:
+                    if self.use_doc_context:
+                        examples = sentence_to_examples(
+                            sent,
+                            self.tokenizer,
+                            doc_context=doc.passages[0].text,
+                            pair_types=self.meta.pair_types,
+                            label_to_id=None,
+                            max_length=self.max_length,
+                            mark_with_special_tokens=self.mark_with_special_tokens,
+                            blind_entities=self.blind_entities,
+                            entity_to_side_information=self.entity_side_information,
+                            pair_to_side_information=self.pair_side_information,
+                            entity_to_embedding_index=self.entity_to_embedding_index
+                        )
+                    else:
+                        examples = sentence_to_examples(
+                            sent,
+                            self.tokenizer,
+                            doc_context=None,
+                            pair_types=self.meta.pair_types,
+                            label_to_id=None,
+                            max_length=self.max_length,
+                            mark_with_special_tokens=self.mark_with_special_tokens,
+                            blind_entities=self.blind_entities,
+                            entity_to_side_information=self.entity_side_information,
+                            pair_to_side_information=self.pair_side_information,
+                        entity_to_embedding_index=self.entity_to_embedding_index
+                        )
+                    if examples:
+                        batch = collator([i["features"] for i in examples])
+                        for k, v in batch.items():
+                            batch[k] = v.to(self.device)
+                        batch["meta"] = meta
+                        out = self.forward(batch)
+                        # preds = self.logits_to_indicators(out.logits)
+                        for example, logits in zip(examples, out.logits):
+                            head = example["head"]
+                            tail = example["tail"]
+                            for label_idx, logit in enumerate(logits):
+                                rel = bioc.BioCRelation()
+                                rel.infons["prob"] = torch.sigmoid(logits[label_idx]).item()
+                                rel.infons["type"] = (
+                                    self.meta.id_to_label[
+                                        label_idx
+                                    ]
+                                )
+                                rel.add_node(bioc.BioCNode(refid=head, role="head"))
+                                rel.add_node(bioc.BioCNode(refid=tail, role="tail"))
+                                sent.add_relation(rel)
 
         return None
 
-    def get_dataset(self, path, limit_examples=None):
+    def get_dataset(self, path, limit_examples=None, limit_documents=None):
         if str(path).endswith(".bioc.xml"):
             return BiocDataset(path, self.tokenizer, limit_examples=limit_examples,
+                               limit_documents=limit_documents,
                                use_doc_context=self.use_doc_context,
                                mark_with_special_tokens=self.mark_with_special_tokens,
                                blind_entities=self.blind_entities,
                                max_length=self.max_length,
                                entity_to_side_information=self.entity_side_information,
                                pair_to_side_information=self.pair_side_information,
-                               use_none_class=self.use_none_class)
+                               use_none_class=self.use_none_class,
+                               entity_to_embedding_index=self.entity_to_embedding_index
+                               )
         elif str(path).endswith(".tsv"):
-            return TSVDataset(path=path, tokenizer=self.tokenizer, limit_examples=limit_examples, max_length=self.max_length, entity_to_side_information=self.entity_side_information, use_none_class=self.use_none_class)
+            return TSVDataset(path=path, tokenizer=self.tokenizer, limit_examples=limit_examples, max_length=self.max_length, entity_to_side_information=self.entity_side_information, use_none_class=self.use_none_class,
+                              entity_to_embedding_index=self.entity_to_embedding_index)

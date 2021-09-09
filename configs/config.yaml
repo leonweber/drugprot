@@ -39,4 +39,4 @@ ignore_warnings: True
 seed: 42
 checkpoint: null
 
-batch_size: 16
+batch_size: 32
