@@ -1,0 +1,10 @@
+{
+  "labels": [
+    "NONE",
+    "EFFECT",
+    "MECHANISM",
+    "ADVISE",
+    "INT"
+  ],
+  "pair_types": []
+}

@@ -1,0 +1,5 @@
+_target_: drugprot.models.joint.JointModel
+
+transformer: microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract
+lr: 3e-5
+dist_penalize_factor: null

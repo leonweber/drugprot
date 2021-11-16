@@ -1,0 +1,11 @@
+train:
+  - data/drugprot_biosyn_norm/train.bioc.xml
+  - data/drugprot_biosyn_norm/dev.bioc.xml
+dev: data/drugprot_biosyn_norm/dev.bioc.xml
+predict: data/drugprot_biosyn_norm/test.bioc.xml
+finetune: null
+limit_examples: null
+limit_documents: null
+checkpoint: null
+dataset_to_batch_size:
+  drugprot: 16

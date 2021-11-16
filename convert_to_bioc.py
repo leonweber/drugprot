@@ -3,7 +3,6 @@ from collections import defaultdict
 from pathlib import Path
 
 from flair.tokenization import SegtokSentenceSplitter
-from pedl.utils import DataGetter
 import bioc
 from sklearn.model_selection import train_test_split
 
@@ -35,7 +34,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--abstracts", type=Path, required=True)
     parser.add_argument("--entities", type=Path, required=True)
-    parser.add_argument("--relations", type=Path, required=True)
+    parser.add_argument("--relations", type=Path, required=False)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--pubtator", help="enrich with pubtator annotations",
                         action="store_true")
@@ -48,7 +47,11 @@ if __name__ == '__main__':
     pmid_to_text = {}
     pmid_to_entities = defaultdict(dict)
     pmid_to_relations = defaultdict(set)
-    data_getter = DataGetter(set(), skip_gene2pmid=True)
+
+
+    if args.pubtator:
+        import pedl
+        data_getter = pedl.DataGetter(set(), skip_gene2pmid=True)
     collection = bioc.BioCCollection()
 
     with open(args.abstracts) as f:
@@ -70,13 +73,14 @@ if __name__ == '__main__':
             pmid_to_entities[pmid][ent_id] = (
                 ent_type, int(start), int(end), mention)
 
-    with open(args.relations) as f:
-        for line in f:
-            fields = line.strip().split("\t")
-            pmid, rel_type, arg1, arg2 = fields
-            ent1 = arg1.split(":")[1]
-            ent2 = arg2.split(":")[1]
-            pmid_to_relations[pmid].add((rel_type, ent1, ent2))
+    if args.relations:
+        with open(args.relations) as f:
+            for line in f:
+                fields = line.strip().split("\t")
+                pmid, rel_type, arg1, arg2 = fields
+                ent1 = arg1.split(":")[1]
+                ent2 = arg2.split(":")[1]
+                pmid_to_relations[pmid].add((rel_type, ent1, ent2))
 
     pubtator_annotations = {}
     if args.pubtator:
@@ -150,5 +154,6 @@ if __name__ == '__main__':
         print(f"Wrote {len(collection.documents)} docs to {args.out}")
 
     print(f"{100*n_entities_normalized/n_entities_total:.2f}% of entities could be normalized")
-    print(f"{100*n_relations_in_sentence/n_relations_total:.2f}% of relations are intra-sentential")
+    if n_relations_total:
+        print(f"{100*n_relations_in_sentence/n_relations_total:.2f}% of relations are intra-sentential")
 

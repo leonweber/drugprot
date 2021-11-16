@@ -1,0 +1,12 @@
+train:
+  - data/drugprot/train.bioc.xml
+  - data/ctd/small.tsv
+dev: data/drugprot/dev.bioc.xml
+predict: data/drugprot/dev.bioc.xml
+finetune:
+  - data/drugprot/train.bioc.xml
+limit_examples: null
+checkpoint: null
+dataset_to_batch_size:
+  drugprot: 8
+  ctd: 8

@@ -1,7 +1,11 @@
+import dataclasses
+import json
 import logging
 import os.path
 import warnings
 import tempfile
+
+import hydra
 import pytorch_lightning as pl
 import wandb
 import re
@@ -12,7 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 from pytorch_lightning.loggers.wandb import WandbLogger
 from pytorch_lightning.utilities import rank_zero_only
-from typing import List, Sequence
+from typing import List, Sequence, Dict, Set
 from tqdm import tqdm
 
 
@@ -142,7 +146,7 @@ def log_hyperparameters(
     # choose which parts of hydra config will be saved to loggers
     hparams["trainer"] = config["trainer"]
     hparams["model"] = config["model"]
-    hparams["batch_size"] = config["batch_size"]
+    hparams["seed"] = config["seed"]
     hparams["finetune_trainer"] = config["finetune_trainer"]
     hparams["data"] = config["data"]
     hparams["out_dir"] = os.path.abspath(os.getcwd())
@@ -165,6 +169,31 @@ def log_hyperparameters(
     # this is just a trick to prevent trainer from logging hparams of model,
     # since we already did that above
     trainer.logger.log_hyperparams = empty
+
+def init(
+        config: DictConfig,
+        model: pl.LightningModule,
+        trainer: pl.Trainer,
+        callbacks: List[pl.Callback],
+        logger: List[pl.loggers.LightningLoggerBase],
+):
+    for lg in logger:
+        if isinstance(lg, WandbLogger):
+            lg.experiment.define_metric("train/f1", summary="max")
+            lg.experiment.define_metric("val/f1", summary="max")
+
+
+def init(
+        config: DictConfig,
+        model: pl.LightningModule,
+        trainer: pl.Trainer,
+        callbacks: List[pl.Callback],
+        logger: List[pl.loggers.LightningLoggerBase],
+):
+    for lg in logger:
+        if isinstance(lg, WandbLogger):
+            lg.experiment.define_metric("drugprot/train/f1", summary="max")
+            lg.experiment.define_metric("drugprot/val/f1", summary="max")
 
 
 def finish(
@@ -218,3 +247,37 @@ def download_file(url: str, cache_dir: Path) -> Path:
     progress.close()
 
     return Path(cache_path)
+
+
+@dataclasses.dataclass
+class DatasetMetaInformation:
+    label_to_id: dict
+    id_to_label: dict
+    pair_types: set
+    name: str
+    type: str
+
+    def to(self, device):
+        return self
+
+
+def get_dataset_metadata(path):
+    with open(Path(hydra.utils.to_absolute_path(path)).parent / "meta.json") as f:
+        meta = json.load(f)
+
+    label_to_id = {}
+    id_to_label = {}
+    for i, label in enumerate(meta["labels"]):
+        label_to_id[label] = i
+        id_to_label[i] = label
+
+    pair_types = set(tuple(i) for i in meta["pair_types"])
+
+    return DatasetMetaInformation(
+        label_to_id=label_to_id,
+        id_to_label=id_to_label,
+        pair_types=pair_types,
+        name=meta["name"],
+        type=meta["type"],
+    )
+

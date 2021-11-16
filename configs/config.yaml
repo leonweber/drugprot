@@ -3,7 +3,7 @@
 # specify here default training configuration
 defaults:
   - trainer: cpu.yaml
-  - finetune_trainer: minimal.yaml
+  - finetune_trainer: none.yaml
   - model: entity_marker_baseline.yaml
   - data: drugprot.yaml
   - callbacks: default.yaml # set this to null if you don't want to use callbacks
@@ -36,5 +36,7 @@ print_config: True
 # disable python warnings if they annoy you
 ignore_warnings: True
 
-batch_size: 8
-optimized_metric: val/f1
+seed: 42
+checkpoint: null
+
+batch_size: 32

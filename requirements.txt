@@ -6,3 +6,4 @@ transformers
 torchmetrics
 tqdm
 scikit-learn
+networkx

@@ -1,0 +1,11 @@
+train:
+  - data/drugprot_biosyn_norm/train.bioc.xml
+  - data/ctd_relabeled/small_relabeled_convincing_explanation.tsv
+dev: data/drugprot_biosyn_norm/dev.bioc.xml
+predict: data/drugprot_biosyn_norm/dev.bioc.xml
+finetune: null
+limit_examples: null
+checkpoint: null
+dataset_to_batch_size:
+  drugprot: 16
+  ctd_relabeled: 16

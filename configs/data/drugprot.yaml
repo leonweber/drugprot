@@ -1,7 +1,10 @@
 train:
-  - data/drugprot/train.bioc.xml
-dev: data/drugprot/dev.bioc.xml
-predict: data/drugprot/dev.bioc.xml
+  - data/drugprot_biosyn_norm/train.bioc.xml
+dev: data/drugprot_biosyn_norm/dev.bioc.xml
+predict: data/drugprot_biosyn_norm/dev.bioc.xml
 finetune: null
 limit_examples: null
+limit_documents: null
 checkpoint: null
+dataset_to_batch_size:
+  drugprot: 16
