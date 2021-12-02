@@ -2,7 +2,7 @@
 
 # specify here default training configuration
 defaults:
-  - trainer: cpu.yaml
+  - trainer: gpu.yaml
   - finetune_trainer: none.yaml
   - model: entity_marker_baseline.yaml
   - data: drugprot.yaml
