@@ -158,7 +158,7 @@ class MultitaskWithDistantModel(pl.LightningModule):
                                                                     use_fast=True)
 
         self.tokenizer.add_tokens(
-            ["[HEAD-S]", "[HEAD-E]", "[TAIL-S]", "[TAIL-E]"], special_tokens=True
+            ['<e1>', '</e1>', '<e2>', '</e2>'], special_tokens=True
         )
         self.transformer.resize_token_embeddings(len(self.tokenizer))
         self.transformer_dropout = nn.Dropout(self.transformer.config.hidden_dropout_prob)
@@ -269,11 +269,11 @@ class MultitaskWithDistantModel(pl.LightningModule):
         if self.use_starts:
             head_start_idx = torch.where(
                 features["input_ids"]
-                == self.tokenizer.convert_tokens_to_ids("[HEAD-S]")
+                == self.tokenizer.convert_tokens_to_ids('<e1>')
             )
             tail_start_idx = torch.where(
                 features["input_ids"]
-                == self.tokenizer.convert_tokens_to_ids("[TAIL-S]")
+                == self.tokenizer.convert_tokens_to_ids('<e2>')
             )
             head_start_rep = seq_emb[head_start_idx]
             tail_start_rep = seq_emb[tail_start_idx]
@@ -283,11 +283,11 @@ class MultitaskWithDistantModel(pl.LightningModule):
         if self.use_ends:
             head_end_idx = torch.where(
                 features["input_ids"]
-                == self.tokenizer.convert_tokens_to_ids("[HEAD-E]")
+                == self.tokenizer.convert_tokens_to_ids('</e1>')
             )
             tail_end_idx = torch.where(
                 features["input_ids"]
-                == self.tokenizer.convert_tokens_to_ids("[TAIL-E]")
+                == self.tokenizer.convert_tokens_to_ids('</e2>')
             )
             head_end_rep = seq_emb[head_end_idx]
             tail_end_rep = seq_emb[tail_end_idx]

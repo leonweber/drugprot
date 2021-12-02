@@ -22,7 +22,7 @@ def test_insert_pair_markers_special_tokens():
 
     text = insert_pair_markers(text=text, head=head, tail=tail, sentence_offset=0,
                                mark_with_special_tokens=True, blind_entities=False)
-    assert text == "by [HEAD-S][TAIL-S]catechol[HEAD-E]-O[TAIL-E] is"
+    assert text == "by <e1><e2>catechol</e1>-O</e2> is"
 
     text = "by catechol-O is"
     head_mention = "catechol-O"
@@ -40,7 +40,7 @@ def test_insert_pair_markers_special_tokens():
     text = insert_pair_markers(text=text, head=head, tail=tail, sentence_offset=0,
                                mark_with_special_tokens=True, blind_entities=False)
 
-    assert text == "by [HEAD-S][TAIL-S]catechol[TAIL-E]-O[HEAD-E] is"
+    assert text == "by <e1><e2>catechol</e2>-O</e1> is"
 
     text = "by alpha catechol-O is"
     head_mention = "alpha catechol-O"
@@ -58,7 +58,7 @@ def test_insert_pair_markers_special_tokens():
     text = insert_pair_markers(text=text, head=head, tail=tail, sentence_offset=0,
                                mark_with_special_tokens=True, blind_entities=False)
 
-    assert text == "by [HEAD-S]alpha [TAIL-S]catechol[TAIL-E]-O[HEAD-E] is"
+    assert text == "by <e1>alpha <e2>catechol</e2>-O</e1> is"
 
     text = "by alpha catechol-O is"
     head_mention = "catechol"
@@ -76,7 +76,7 @@ def test_insert_pair_markers_special_tokens():
     text = insert_pair_markers(text=text, head=head, tail=tail, sentence_offset=0,
                                mark_with_special_tokens=True, blind_entities=False)
 
-    assert text == "by [TAIL-S]alpha [HEAD-S]catechol[HEAD-E]-O[TAIL-E] is"
+    assert text == "by <e2>alpha <e1>catechol</e1>-O</e2> is"
 
     text = "by alpha catechol-O is"
     head_mention = "catechol-O"
@@ -94,7 +94,7 @@ def test_insert_pair_markers_special_tokens():
     text = insert_pair_markers(text=text, head=head, tail=tail, sentence_offset=0,
                                mark_with_special_tokens=True, blind_entities=False)
 
-    assert text == "by [TAIL-S]alpha [HEAD-S]catechol[TAIL-E]-O[HEAD-E] is"
+    assert text == "by <e2>alpha <e1>catechol</e2>-O</e1> is"
 
 
     text = "by foo does catechol-O is"
@@ -113,7 +113,7 @@ def test_insert_pair_markers_special_tokens():
     text = insert_pair_markers(text=text, head=head, tail=tail, sentence_offset=0,
                                mark_with_special_tokens=True, blind_entities=False)
 
-    assert text == "by [HEAD-S]foo[HEAD-E] does [TAIL-S]catechol-O[TAIL-E] is"
+    assert text == "by <e1>foo</e1> does <e2>catechol-O</e2> is"
 
 def test_insert_pair_markers_single_chars():
     text = "by catechol-O is"

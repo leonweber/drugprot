@@ -39,7 +39,7 @@ class ExplainableBert(pl.LightningModule):
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(transformer)
 
         self.tokenizer.add_tokens(
-            ["[HEAD-S]", "[HEAD-E]", "[TAIL-S]", "[TAIL-E]"], special_tokens=True
+            ['<e1>', '</e1>', '<e2>', '</e2>'], special_tokens=True
         )
         self.transformer.resize_token_embeddings(len(self.tokenizer))
 

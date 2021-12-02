@@ -92,7 +92,7 @@ def sentence_to_examples(
             side_info = f"{pair_side_info} | {head_side_info} | {tail_side_info} [SEP]"
 
             if mark_with_special_tokens:
-                marker = "[HEAD-E]"
+                marker = '</e1>'
             else:
                 marker = "@"
 
@@ -147,10 +147,10 @@ def sentence_to_examples(
 
             if mark_with_special_tokens:
                 try:
-                    assert "HEAD-S" in tokenizer.decode(features["input_ids"])
-                    assert "HEAD-E" in tokenizer.decode(features["input_ids"])
-                    assert "TAIL-S" in tokenizer.decode(features["input_ids"])
-                    assert "TAIL-E" in tokenizer.decode(features["input_ids"])
+                    assert "<e1>" in tokenizer.decode(features["input_ids"])
+                    assert "</e1>" in tokenizer.decode(features["input_ids"])
+                    assert "<e2>" in tokenizer.decode(features["input_ids"])
+                    assert "</e2>" in tokenizer.decode(features["input_ids"])
                 except AssertionError:
                     log.warning("Truncated entity")
                     continue  # entity was truncated
@@ -236,10 +236,10 @@ def delete_consistently(from_idx, to_idx , text, starts, ends):
 
 def insert_pair_markers(text, head, tail, sentence_offset, mark_with_special_tokens, blind_entities):
     if mark_with_special_tokens:
-        head_start_marker = "[HEAD-S]"
-        tail_start_marker = "[TAIL-S]"
-        head_end_marker = "[HEAD-E]"
-        tail_end_marker = "[TAIL-E]"
+        head_start_marker = '<e1>'
+        tail_start_marker = '<e2>'
+        head_end_marker = '</e1>'
+        tail_end_marker = '</e2>'
     else:
         head_start_marker = "@"
         tail_start_marker = "@"
@@ -286,18 +286,18 @@ def insert_pair_markers(text, head, tail, sentence_offset, mark_with_special_tok
         offset=ends[1], text=text, insertion=tail_end_marker, starts=starts, ends=ends
     )
     # marked_head = (
-    #     text[text.index("[HEAD-S]") : text.index("[HEAD-E]")]
-    #     .replace("[HEAD-S]", "")
-    #     .replace("[HEAD-E]", "")
-    #     .replace("[TAIL-S]", "")
-    #     .replace("[TAIL-E]", "")
+    #     text[text.index('<e1>') : text.index('</e1>')]
+    #     .replace('<e1>', "")
+    #     .replace('</e1>', "")
+    #     .replace('<e2>', "")
+    #     .replace('</e2>', "")
     # )
     # marked_tail = (
-    #     text[text.index("[TAIL-S]") : text.index("[TAIL-E]")]
-    #     .replace("[HEAD-S]", "")
-    #     .replace("[HEAD-E]", "")
-    #     .replace("[TAIL-S]", "")
-    #     .replace("[TAIL-E]", "")
+    #     text[text.index('<e2>') : text.index('</e2>')]
+    #     .replace('<e1>', "")
+    #     .replace('</e1>', "")
+    #     .replace('<e2>', "")
+    #     .replace('</e2>', "")
     # )
     # assert (
     #     marked_head == head.text or not head.text.isalnum()
@@ -404,10 +404,10 @@ class TSVDataset:
                 features["token_type_ids"] = [0] * len(features_text.input_ids) + [1] * len(features_side.input_ids)
 
             try:
-                assert "HEAD-S" in tokenizer.decode(features["input_ids"])
-                assert "HEAD-E" in tokenizer.decode(features["input_ids"])
-                assert "TAIL-S" in tokenizer.decode(features["input_ids"])
-                assert "TAIL-E" in tokenizer.decode(features["input_ids"])
+                assert "<e1>" in tokenizer.decode(features["input_ids"])
+                assert "</e1>" in tokenizer.decode(features["input_ids"])
+                assert "<e2>" in tokenizer.decode(features["input_ids"])
+                assert "</e2>" in tokenizer.decode(features["input_ids"])
             except AssertionError:
                 log.warning("Truncated entity")
                 continue
@@ -508,7 +508,7 @@ class EntityMarkerBaseline(pl.LightningModule):
 
         if mark_with_special_tokens:
             self.tokenizer.add_tokens(
-                ["[HEAD-S]", "[HEAD-E]", "[TAIL-S]", "[TAIL-E]"], special_tokens=True
+               ['<e1>','</e1>', '<e2>', '</e2>'], special_tokens=True
             )
             self.transformer.resize_token_embeddings(len(self.tokenizer))
         self.dropout = nn.Dropout(self.transformer.config.hidden_dropout_prob)
@@ -590,15 +590,14 @@ class EntityMarkerBaseline(pl.LightningModule):
 
         if self.use_cls:
             seq_reps.append(seq_emb[:, 0])
-
         if self.use_starts:
             head_start_idx = torch.where(
                 features["input_ids"]
-                == self.tokenizer.convert_tokens_to_ids("[HEAD-S]")
+                == self.tokenizer.convert_tokens_to_ids('<e1>')
             )
             tail_start_idx = torch.where(
                 features["input_ids"]
-                == self.tokenizer.convert_tokens_to_ids("[TAIL-S]")
+                == self.tokenizer.convert_tokens_to_ids('<e2>')
             )
             head_start_rep = seq_emb[head_start_idx]
             tail_start_rep = seq_emb[tail_start_idx]
@@ -608,11 +607,11 @@ class EntityMarkerBaseline(pl.LightningModule):
         if self.use_ends:
             head_end_idx = torch.where(
                 features["input_ids"]
-                == self.tokenizer.convert_tokens_to_ids("[HEAD-E]")
+                == self.tokenizer.convert_tokens_to_ids('</e1>')
             )
             tail_end_idx = torch.where(
                 features["input_ids"]
-                == self.tokenizer.convert_tokens_to_ids("[TAIL-E]")
+                == self.tokenizer.convert_tokens_to_ids('</e2>')
             )
             head_end_rep = seq_emb[head_end_idx]
             tail_end_rep = seq_emb[tail_end_idx]

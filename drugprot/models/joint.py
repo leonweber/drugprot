@@ -83,10 +83,10 @@ def sentence_to_examples(sentence, tokenizer):
             features = tokenizer.encode_plus(text, max_length=512, truncation=True)
 
             try:
-                assert "HEAD-S" in tokenizer.decode(features["input_ids"])
-                assert "HEAD-E" in tokenizer.decode(features["input_ids"])
-                assert "TAIL-S" in tokenizer.decode(features["input_ids"])
-                assert "TAIL-E" in tokenizer.decode(features["input_ids"])
+                assert "<e1>" in tokenizer.decode(features["input_ids"])
+                assert "</e1>" in tokenizer.decode(features["input_ids"])
+                assert "<e2>" in tokenizer.decode(features["input_ids"])
+                assert "</e2>" in tokenizer.decode(features["input_ids"])
             except AssertionError:
                 continue # entity was truncated
 
@@ -140,7 +140,7 @@ class JointModel(pl.LightningModule):
         self.loss = nn.BCEWithLogitsLoss()
         self.transformer = transformers.AutoModel.from_pretrained(transformer)
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(transformer)
-        self.tokenizer.add_tokens(["[HEAD-S]", "[HEAD-E]", "[TAIL-S]", "[TAIL-E]"],
+        self.tokenizer.add_tokens(['<e1>', '</e1>', '<e2>', '</e2>'],
                                   special_tokens=True)
         self.transformer.resize_token_embeddings(len(self.tokenizer))
         self.dropout = nn.Dropout(self.transformer.config.hidden_dropout_prob)
@@ -166,9 +166,9 @@ class JointModel(pl.LightningModule):
                                   )
         seq_emb = self.dropout(output.last_hidden_state)
         head_idx = torch.where(
-            features["input_ids"] == self.tokenizer.convert_tokens_to_ids("[HEAD-S]"))
+            features["input_ids"] == self.tokenizer.convert_tokens_to_ids('<e1>'))
         tail_idx = torch.where(
-            features["input_ids"] == self.tokenizer.convert_tokens_to_ids("[TAIL-S]"))
+            features["input_ids"] == self.tokenizer.convert_tokens_to_ids('<e2>'))
         head_reps = seq_emb[head_idx]
         tail_reps = seq_emb[tail_idx]
         mention_pair_reps = torch.cat([head_reps, tail_reps], dim=1)

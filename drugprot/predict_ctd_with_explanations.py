@@ -17,7 +17,7 @@ import torch
 
 tokenizer = AutoTokenizer.from_pretrained("microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract", use_fast=True)
 tokenizer.add_tokens(
-    ["[HEAD-S]", "[HEAD-E]", "[TAIL-S]", "[TAIL-E]"], special_tokens=True
+    ['<e1>', '</e1>', '<e2>', '</e2>'], special_tokens=True
 )
 collator = transformers.DataCollatorWithPadding(tokenizer)
 
@@ -44,7 +44,7 @@ with open("/vol/fob-vol1/mi15/weberple/projects/drugprot/data/ctd/small.tsv") as
         _, head_cuid, _, tail_cuid, labels, text, _ = line.split("\t")
         features = tokenizer.encode_plus(text, max_length=128, truncation=True)
         text = tokenizer.decode(features.input_ids)
-        if text not in processed_sentences and "[HEAD-E]" in text and "[TAIL-E]" in text:
+        if text not in processed_sentences and '</e1>' in text and '</e2>' in text:
             processed_sentences.add(text)
             example = {
                 "features": features,
