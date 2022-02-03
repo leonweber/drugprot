@@ -6,5 +6,7 @@
     "ADVISE",
     "INT"
   ],
-  "pair_types": []
+  "pair_types": [],
+  "name": "ddi",
+  "type": "sentence"
 }

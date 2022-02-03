@@ -50,7 +50,10 @@ class MultiTaskBatchSampler(BatchSampler):
         return index_batches
 
     def __len__(self):
-        return sum(len(train_data) for train_data in self._train_data_list)
+        all_indices = self._gen_task_indices(
+            self._train_data_list, self._mix_opt, self._extra_task_ratio
+        )
+        return len(all_indices)
 
     def __iter__(self):
         all_iters = [iter(item) for item in self._train_data_list]
@@ -64,6 +67,12 @@ class MultiTaskBatchSampler(BatchSampler):
 
     @staticmethod
     def _gen_task_indices(train_data_list, mix_opt, extra_task_ratio):
+        """
+        :param train_data_list:
+        :param mix_opt: if > 0 then for each epoch first train on extra data before training on main data
+        :param extra_task_ratio: add at most `extra_task_ratio' * `len(main_task_data)' per epoch
+        :return:
+        """
         all_indices = []
         if len(train_data_list) > 1 and extra_task_ratio > 0:
             main_indices = [0] * len(train_data_list[0])

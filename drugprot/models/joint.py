@@ -145,7 +145,7 @@ class JointModel(pl.LightningModule):
         self.transformer.resize_token_embeddings(len(self.tokenizer))
         self.dropout = nn.Dropout(self.transformer.config.hidden_dropout_prob)
         self.cuid_pair_classifier = nn.Linear(self.transformer.config.hidden_size * 2,
-                                    len(LABEL_TO_ID))
+                                              len(LABEL_TO_ID))
         self.mention_pair_classifier = nn.Sequential(
             nn.Linear(self.transformer.config.hidden_size * 4, self.transformer.config.hidden_size),
             nn.ReLU(),

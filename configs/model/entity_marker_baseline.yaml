@@ -13,7 +13,7 @@ mark_with_special_tokens: true
 blind_entities: false
 optimized_metric: drugprot/val/f1
 max_length: 256
-entity_side_information: ctd_entities.tsv
+entity_side_information: null
 pair_side_information: null
 use_none_class: false
 entity_embeddings: null

@@ -26,7 +26,7 @@ if __name__ == "__main__":
         df = pd.read_csv(f, comment="#", sep=",", header=None)
         df.columns = ["ChemicalName", "ChemicalID", "CasRN", "Definition", "ParentIDs", "TreeNumbers", "ParentTreeNumbers", "Synonyms"]
         df = df.fillna("")
-        for _, row in df.iterrows():
+        for _, row in df.iterrows():![](../../../Documents/Student projects/2021 Xing Masterarbeit/Masterarbeit_Xing_David_Wang.png)
             mesh_to_description[row["ChemicalID"]] = row["Definition"]
             mesh_to_parents[row["ChemicalID"]] = row["ParentIDs"].split("|")
             for parent_mesh in row["ParentIDs"].split("|"):

@@ -108,7 +108,7 @@ def train(config: DictConfig) -> Optional[float]:
         train_batch_sampler = MultiTaskBatchSampler(datasets=train_datasets,
                                                     dataset_to_batch_size=config["data"]["dataset_to_batch_size"],
                                                     mix_opt=0,
-                                                    extra_task_ratio=0)
+                                                    extra_task_ratio=1)
 
         train_loader = DataLoader(
             dataset=train_dataset,

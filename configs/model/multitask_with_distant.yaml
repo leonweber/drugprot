@@ -1,8 +1,8 @@
 _target_: drugprot.models.multitask_with_distant.MultitaskWithDistantModel
 
-transformer: microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract
+transformer: /vol/fob-vol1/mi15/weberple/weberple/transformers/RoBERTa-large-PM-M3-Voc-hf
 lr: 3e-5
-finetune_lr: 1e-5
+finetune_lr: 3e-5
 use_doc_context: false
 use_cls: true
 use_starts: false
@@ -12,7 +12,7 @@ sentence_batch_size: 8
 distant_batch_size: 2
 aggregator: lse
 optimized_metric: drugprot/val/f1
-max_length: 128
+max_length: 256
 learn_logits_mapping: []
 aggregate_after_logits: false
 use_none_class: true

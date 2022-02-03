@@ -450,7 +450,7 @@ class MultitaskWithDistantModel(pl.LightningModule):
 
         return None
 
-    def get_dataset(self, path, limit_examples=None):
+    def get_dataset(self, path, limit_examples=None, limit_documents=None):
         meta = utils.get_dataset_metadata(path)
         if meta.type == "distant":
             return DistantDataset(
@@ -465,11 +465,15 @@ class MultitaskWithDistantModel(pl.LightningModule):
                 path,
                 self.tokenizer,
                 limit_examples=limit_examples,
+                limit_documents=limit_documents,
                 use_doc_context=self.use_doc_context,
                 mark_with_special_tokens=True,
                 blind_entities=self.blind_entities,
                 max_length=self.max_length,
-                use_none_class=self.use_none_class
+                use_none_class=self.use_none_class,
+                entity_to_side_information=None,
+                pair_to_side_information=None,
+                entity_to_embedding_index=None
             )
         else:
             raise ValueError(meta.type)

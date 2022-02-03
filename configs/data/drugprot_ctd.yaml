@@ -8,5 +8,5 @@ finetune:
 limit_examples: null
 checkpoint: null
 dataset_to_batch_size:
-  drugprot: 8
+  drugprot: 16
   ctd: 2

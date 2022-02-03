@@ -7,5 +7,7 @@
     ["CHEMICAL", "GENE-Y"],
     ["CHEMICAL", "GENE-N"],
     ["CHEMICAL", "GENE"]
-  ]
+  ],
+  "name": "eu_adr",
+  "type": "sentence"
 }

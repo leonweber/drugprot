@@ -1,13 +1,17 @@
 train:
   - data/drugprot/train.bioc.xml
   - data/ddi/ddi.bioc.xml
+  - data/ctd/small.tsv
+  - data/eu_adr/euadr.bioc.xml
 dev: data/drugprot/dev.bioc.xml
 predict: data/drugprot/dev.bioc.xml
 finetune:
   - data/drugprot/train.bioc.xml
 limit_examples: null
-checkpoint: null
 limit_documents: null
+checkpoint: null
 dataset_to_batch_size:
   drugprot: 16
   ddi: 16
+  eu_adr: 16
+  ctd: 2
